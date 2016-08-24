@@ -81,12 +81,18 @@ grinder_scripting() {
 gatling_scripting() {
   RESULTS=${TESTDIR}/results/${STARTTIME}/gatling/static
   mkdir -p ${RESULTS}
-
+  CFG=${TESTDIR}/configs/gatling_${STARTTIME}.scala  
+  HOST=`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f1`
+  PATH=/`echo ${TARGETURL} |awk -F\/ '{print $NF}'`
+  sed 's/TARGETHOST/'${HOST}'/' ${TESTDIR}/configs/gatling.scala |sed 's/TARGETPATH/'${PATH}'/' >${CFG}
+  # TODO - fix Gatlings tricky config setup...  
 }
 wrk_scripting() {
   RESULTS=${TESTDIR}/results/${STARTTIME}/wrk/static
   mkdir -p ${RESULTS}
-
+  CFG=${TESTDIR}/configs/wrk_${STARTTIME}.lua
+  sed 's/TARGETURL/'${TARGETURL}'/' ${TESTDIR}/configs/wrk.lua >${CFG}
+  ${TESTDIR}/wrk/wrk -c20 -t20 -d30 --script ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
 }
 
 staticurltests() {
@@ -103,7 +109,7 @@ staticurltests() {
 scriptingtests() {
   locust_scripting
   grinder_scripting
-  gatling_scripting
+  #gatling_scripting
   wrk_scripting
 }
 
