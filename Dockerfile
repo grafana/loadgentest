@@ -2,27 +2,30 @@ FROM ubuntu:14.04
 
 RUN apt-get update
 
-ENV testdir /loadgentests
+ENV TESTDIR /loadgentests
 
 # Make dir where we will put all our loadgen tools, data and dependencies
-RUN mkdir ${testdir}
+RUN mkdir ${TESTDIR}
 
-# C compiler, make, libssl, autoconf
-RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip wget git python-pip python-dev
+# C compiler, make, libssl, autoconf, etc
+RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip wget git python-pip python-dev python-zmq
 
-# install latest Golang to ${testdir}/go1.7, set GOPATH to ${testdir}/go
-RUN mkdir ${testdir}/go1.7 ${testdir}/go
-RUN wget -O - 'https://storage.googleapis.com/golang/go1.7.linux-amd64.tar.gz' |tar -C ${testdir}/go1.7 -xzf -
-ENV GOROOT ${testdir}/go1.7/go
-ENV PATH ${GOROOT}/bin:${PATH}
-ENV GOPATH ${testdir}/go
+# Symlink to nodejs
+RUN ln -s `which nodejs` /usr/bin/node
+
+# install latest Golang to ${TESTDIR}/go1.7, set GOPATH to ${TESTDIR}/go
+RUN mkdir ${TESTDIR}/go1.7 ${TESTDIR}/go
+RUN wget -O - 'https://storage.googleapis.com/golang/go1.7.linux-amd64.tar.gz' |tar -C ${TESTDIR}/go1.7 -xzf -
+ENV GOROOT ${TESTDIR}/go1.7/go
+ENV GOPATH ${TESTDIR}/go
+ENV PATH ${GOPATH}/bin:${GOROOT}/bin:${PATH}
 
 # Create .gitconfig
 COPY Gitconfig ${HOME}/.gitconfig
 
 # Get and compile wrk (latest snapshot)
-RUN cd ${testdir} && git clone 'https://github.com/wg/wrk.git'
-RUN cd ${testdir}/wrk && make
+RUN cd ${TESTDIR} && git clone 'https://github.com/wg/wrk.git'
+RUN cd ${TESTDIR}/wrk && make
 
 # Get and compile boom (latest snapshot)
 RUN go get -u github.com/rakyll/boom
@@ -35,31 +38,35 @@ RUN apt-get -y install apache2-utils
 
 # Get and compile Siege (latest snapshot)
 RUN apt-get -y install siege
-#RUN cd ${testdir} && git clone 'https://github.com/JoeDog/siege.git'
-#RUN cd ${testdir}/siege && autoconf && ./configure && make
+#RUN cd ${TESTDIR} && git clone 'https://github.com/JoeDog/siege.git'
+#RUN cd ${TESTDIR}/siege && autoconf && ./configure && make
 
 # Install Tsung (>=1.6.0)
 RUN apt-get -y install tsung
-#RUN cd ${testdir} && wget -O - 'http://tsung.erlang-projects.org/dist/tsung-1.6.0.tar.gz' |tar -xzf -
+#RUN cd ${TESTDIR} && wget -O - 'http://tsung.erlang-projects.org/dist/tsung-1.6.0.tar.gz' |tar -xzf -
 
 # Install Locust (>=0.7.5)
 RUN pip install locustio
 
 # Gatling 2.2.2
-RUN cd ${testdir} && wget 'https://repo1.maven.org/maven2/io/gatling/highcharts/gatling-charts-highcharts-bundle/2.2.2/gatling-charts-highcharts-bundle-2.2.2-bundle.zip' && \
+RUN cd ${TESTDIR} && wget 'https://repo1.maven.org/maven2/io/gatling/highcharts/gatling-charts-highcharts-bundle/2.2.2/gatling-charts-highcharts-bundle-2.2.2-bundle.zip' && \
   unzip gatling-charts-highcharts-bundle-2.2.2-bundle.zip && rm gatling-charts-highcharts-bundle-2.2.2-bundle.zip
 
 # Jmeter 3.0
-RUN cd ${testdir} && wget -O - 'http://apache.mirrors.spacedump.net//jmeter/binaries/apache-jmeter-3.0.tgz' |tar -zxf -
+RUN cd ${TESTDIR} && wget -O - 'http://apache.mirrors.spacedump.net//jmeter/binaries/apache-jmeter-3.0.tgz' |tar -zxf -
 
 # Grinder 3.11
-RUN cd ${testdir} && wget 'http://downloads.sourceforge.net/project/grinder/The%20Grinder%203/3.11/grinder-3.11-binary.zip' && \
+RUN cd ${TESTDIR} && wget 'http://downloads.sourceforge.net/project/grinder/The%20Grinder%203/3.11/grinder-3.11-binary.zip' && \
   unzip grinder-3.11-binary.zip && rm grinder-3.11-binary.zip
 
 # Artillery (>=1.5.0-12)
 RUN npm install -g artillery
 
+COPY runtests.sh ${TESTDIR}
 
+RUN mkdir ${TESTDIR}/configs
 
+COPY tsung.xml ${TESTDIR}/configs
 
+CMD ${TESTDIR}/runtests.sh
 
