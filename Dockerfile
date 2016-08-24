@@ -1,4 +1,4 @@
-FROM ubuntu/14.04
+FROM ubuntu:14.04
 
 RUN apt-get update
 
@@ -8,20 +8,20 @@ ENV testdir /loadgentests
 RUN mkdir ${testdir}
 
 # C compiler, make, libssl, autoconf
-RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip
+RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip wget git python-pip python-dev
 
-# install latest Golang to ${testdir}/go1.7, set GOHOME to ${testdir}/go
+# install latest Golang to ${testdir}/go1.7, set GOPATH to ${testdir}/go
 RUN mkdir ${testdir}/go1.7 ${testdir}/go
 RUN wget -O - 'https://storage.googleapis.com/golang/go1.7.linux-amd64.tar.gz' |tar -C ${testdir}/go1.7 -xzf -
 ENV GOROOT ${testdir}/go1.7/go
 ENV PATH ${GOROOT}/bin:${PATH}
-ENV GOHOME ${testdir}/go
+ENV GOPATH ${testdir}/go
 
 # Create .gitconfig
 COPY Gitconfig ${HOME}/.gitconfig
 
 # Get and compile wrk (latest snapshot)
-RUN cd ${testdir} && git clone 'git@github.com:wg/wrk.git'
+RUN cd ${testdir} && git clone 'https://github.com/wg/wrk.git'
 RUN cd ${testdir}/wrk && make
 
 # Get and compile boom (latest snapshot)
@@ -34,8 +34,9 @@ RUN go get -u github.com/tsenart/vegeta
 RUN apt-get -y install apache2-utils
 
 # Get and compile Siege (latest snapshot)
-RUN cd ${testdir} && git clone 'git@github.com:JoeDog/siege.git'
-RUN cd ${testdir}/siege && autoconf && ./configure && make
+RUN apt-get -y install siege
+#RUN cd ${testdir} && git clone 'https://github.com/JoeDog/siege.git'
+#RUN cd ${testdir}/siege && autoconf && ./configure && make
 
 # Install Tsung (>=1.6.0)
 RUN apt-get -y install tsung
