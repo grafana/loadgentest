@@ -66,7 +66,13 @@ COPY runtests.sh ${TESTDIR}
 
 RUN mkdir ${TESTDIR}/configs
 
-COPY tsung.xml ${TESTDIR}/configs
+COPY configs/tsung.xml ${TESTDIR}/configs
+COPY configs/jmeter.xml ${TESTDIR}/configs
+COPY configs/gatling.scala ${TESTDIR}/configs
+COPY configs/grinder.py ${TESTDIR}/configs
+COPY configs/grinder.properties ${TESTDIR}/configs
+COPY configs/locust.py ${TESTDIR}/configs
+COPY configs/wrk.lua ${TESTDIR}/configs
 
 CMD ${TESTDIR}/runtests.sh
 
