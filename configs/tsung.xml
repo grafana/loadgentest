@@ -1,4 +1,6 @@
-<?xml version="1.0"?><tsung loglevel="notice" version="1.0">
+<?xml version="1.0"?>
+<!DOCTYPE tsung SYSTEM "/usr/share/tsung/tsung-1.0.dtd">
+<tsung loglevel="notice" version="1.0">
 
   <clients>
     <client host="localhost" use_controller_vm="true"/>
@@ -12,16 +14,16 @@
     <monitor host="myserver" type="snmp"/>
   </monitoring>
   
-  <load duration="30" unit="second">
-    <arrivalphase phase="1" duration="30" unit="second">
-      <users maxnumber="20" arrivalrate="100" unit="second"/>
+  <load duration="DURATION" unit="second">
+    <arrivalphase phase="1" duration="DURATION" unit="second">
+      <users maxnumber="CONCURRENT" arrivalrate="CONCURRENT" unit="second"/>
     </arrivalphase>
   </load>
 
   <sessions>
     <session name="http-example" probability="100" type="ts_http">
-      <for from="1" to="1000000" var="i">
-        <request> <http url="TARGETURL" method="GET" version="1.1"/> </request>
+      <for from="1" to="REQS_PER_VU" var="i">
+        <request> <http url="TARGETURL" method="GET" version="1.1"></http> </request>
       </for>
     </session>
   </sessions>

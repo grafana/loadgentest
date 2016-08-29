@@ -10,6 +10,11 @@ RUN mkdir ${TESTDIR}
 # C compiler, make, libssl, autoconf, etc
 RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip wget git python-pip python-dev python-zmq
 
+# Update nodejs
+RUN npm cache clean -f
+RUN npm install -g n
+RUN n stable
+
 # Symlink to nodejs
 RUN ln -s `which nodejs` /usr/bin/node
 
@@ -18,7 +23,7 @@ RUN mkdir ${TESTDIR}/go1.7 ${TESTDIR}/go
 RUN wget -O - 'https://storage.googleapis.com/golang/go1.7.linux-amd64.tar.gz' |tar -C ${TESTDIR}/go1.7 -xzf -
 ENV GOROOT ${TESTDIR}/go1.7/go
 ENV GOPATH ${TESTDIR}/go
-ENV PATH ${GOPATH}/bin:${GOROOT}/bin:${PATH}
+ENV PATH ${GOPATH}/bin:${GOROOT}/bin:/usr/local/bin:${PATH}
 
 # Create .gitconfig
 COPY Gitconfig ${HOME}/.gitconfig
@@ -41,9 +46,9 @@ RUN apt-get -y install siege
 #RUN cd ${TESTDIR} && git clone 'https://github.com/JoeDog/siege.git'
 #RUN cd ${TESTDIR}/siege && autoconf && ./configure && make
 
-# Install Tsung (>=1.6.0)
-RUN apt-get -y install tsung
-#RUN cd ${TESTDIR} && wget -O - 'http://tsung.erlang-projects.org/dist/tsung-1.6.0.tar.gz' |tar -xzf -
+# Install Tsung (1.6.0)
+RUN cd ${TESTDIR} && wget -O - 'http://tsung.erlang-projects.org/dist/tsung-1.6.0.tar.gz' |tar -xzf -
+RUN cd ${TESTDIR}/tsung-1.6.0 && ./configure && make install
 
 # Install Locust (>=0.7.5)
 RUN pip install locustio
@@ -63,6 +68,7 @@ RUN cd ${TESTDIR} && wget 'http://downloads.sourceforge.net/project/grinder/The%
 RUN npm install -g artillery
 
 COPY runtests.sh ${TESTDIR}
+RUN chmod 755 ${TESTDIR}/runtests.sh
 
 RUN mkdir ${TESTDIR}/configs
 

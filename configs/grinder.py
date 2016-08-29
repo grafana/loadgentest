@@ -8,6 +8,6 @@ test1.record(request1)
 
 class TestRunner:
     def __call__(self):
-        for i in range(1000):
+        for i in range(REQS_PER_VU):
             result = request1.GET("TARGETURL")
 
