@@ -63,8 +63,9 @@ replace_all() {
 
 # utility func to interpret "Xs", "Xms", "Xus", "Xns" durations and translate them to ms
 duration2ms() {
-  UNIT=`echo $1 |egrep -o '[mun]?s'`
-  NUM=`echo $1 |sed 's/'${UNIT}'//'`
+  read X
+  UNIT=`echo $X |egrep -o '[mun]?s'`
+  NUM=`echo $X |sed 's/'${UNIT}'//'`
   if [ "${UNIT}x" = "sx" ]; then
     echo "${NUM}*1000" |bc
   elif [ "${UNIT}x" = "usx" ]; then
@@ -114,19 +115,20 @@ apachebench_static() {
   RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing ab -k -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
-  ab -k -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  PERCENTAGES=${RESULTS}/percentages
+  echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _REQUESTS=`grep '^Complete\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
   _RPS=`grep '^Requests\ per\ second:' ${RESULTS}/stdout.log |awk '{print $4}' |stripdecimals`
   _RTTAVG=`grep '^Time\ per\ request:' ${RESULTS}/stdout.log |grep '(mean)' |awk '{print $4}' |stripdecimals`
-  _ERRORS="-"
+  _ERRORS=`grep '^Failed\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
   _RTTMIN="-"
   _RTTMAX="-"
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _RTTp50=`grep '^50,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
+  _RTTp75=`grep '^75,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
+  _RTTp90=`grep '^90,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
+  _RTTp95=`grep '^95,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
+  _RTTp99=`grep '^99,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
@@ -134,6 +136,37 @@ apachebench_static() {
   echo ""
   sleep 3
 }
+
+wrk_static() {
+  TESTNAME=${FUNCNAME[0]}
+  echo ""
+  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  mkdir -p ${RESULTS}
+  TIMINGS="${RESULTS}/timings"
+  # Note that we supply TARGETURL on the cmd line as wrk requires that, but the cmd line parameter will
+  # not be used as our script decides what URL to load (which will of course be the same TARGETURL though)
+  echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
+  ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |stripdecimals`
+  _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
+  _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
+  _ERRORS="-"
+  _RTTMIN="-"
+  _RTTMAX=`grep -A 2 'Thread stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $4}' |duration2ms |stripdecimals`
+  _RTTp50=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="50%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp75=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="75%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp90=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="90%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp95="-"
+  _RTTp99=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
+  echo ""
+  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  echo "${TESTNAME}: done"
+  echo ""
+  sleep 3
+}
+
 boom_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
@@ -144,19 +177,17 @@ boom_static() {
   echo "${TESTNAME}: Executing boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _RPS=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Requests/sec:' |awk '{print $2}' |stripdecimals`
-  _RTTAVG=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Average:' |awk '{print $2*1000}' |stripdecimals`
   _DURATION=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Total:' |awk '{print $2}'`
-  _REQUESTS=`echo "${_DURATION}*${_RPS}" |bc |awk -F\. '{print $1}'`
-  # Note: we *calculate* # of requests, which may result in small errors due to floating point precision issues.
-  # TODO: extract # of requests from boom output instead.
-  _ERRORS="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _REQUESTS=`grep ' \[200\] ' ${RESULTS}/stdout.log |grep ' responses' |awk '{print $2}'`
+  _ERRORS=`grep -A 10 '^Status code distribution:' ${RESULTS}/stdout.log |grep -v ' \[200\] ' |grep ' responses' |awk 'BEGIN{tot=0}{tot=tot+$2}END{print tot}'`
+  _RTTMIN=`egrep 'Fastest: [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
+  _RTTMAX=`egrep 'Slowest: [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
+  _RTTAVG=`egrep 'Average: [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
+  _RTTp50=`egrep '50% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp75=`egrep '75% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp90=`egrep '90% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp95=`egrep '95% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp99=`egrep '99% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
@@ -164,36 +195,7 @@ boom_static() {
   echo ""
   sleep 3
 }
-wrk_static() {
-  TESTNAME=${FUNCNAME[0]}
-  echo ""
-  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
-  mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  # Note that we supply TARGETURL on the cmd line as wrk requires that, but the cmd line parameter will
-  # not be used as our script decides what URL to load (which will of course be the same TARGETURL though)
-  echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} ${TARGETURL} ... "
-  ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _RPS=`grep -A 5 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |stripdecimals`
-  _RTTVAL=`grep -A 5 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}'`
-  _RTT=`duration2ms ${RTTVAL} |stripdecimals`
-  _REQUESTS=`grep -A 5 'Thread Stats' ${RESULTS}/stdout.log |grep ' requests in ' |awk '{print $1}'`
-  _ERRORS="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
-  echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
-  echo "${TESTNAME}: done"
-  echo ""
-  sleep 3
-}
+
 artillery_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
@@ -480,20 +482,19 @@ wrk_scripting() {
   TIMINGS="${RESULTS}/timings"
   CFG=${TESTDIR}/configs/wrk_${STARTTIME}.lua
   replace_all ${TESTDIR}/configs/wrk.lua ${CFG}
-  echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --script ${CFG} ${TARGETURL} ... "
-  ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --script ${CFG} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _RPS=`grep -A 5 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |stripdecimals`
-  _RTTVAL=`grep -A 5 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}'`
-  _RTTAVG=`duration2ms ${_RTTVAL} |stripdecimals`
-  _REQUESTS=`grep -A 5 'Thread Stats' ${RESULTS}/stdout.log |grep ' requests in ' |awk '{print $1}'`
+  echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} ... "
+  ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |stripdecimals`
+  _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
+  _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
   _ERRORS="-"
   _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
+  _RTTMAX=`grep -A 2 'Thread stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $4}' |duration2ms |stripdecimals`
+  _RTTp50=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="50%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp75=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="75%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp90=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="90%"{print $2}' |duration2ms |stripdecimals`
   _RTTp95="-"
-  _RTTp99="-"
+  _RTTp99=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
