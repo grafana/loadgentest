@@ -89,23 +89,29 @@ report() {
       echo "$2"
     fi
     awk '{printf $1" "; \
-      if ($2=="-" || $2==0)printf "- "; else printf "requests="$2" "; \
-      if ($3=="-" || $3==0)printf "- "; else printf "errors="$3" "; \
-      if ($4=="-" || $4==0)printf "- "; else printf "rps="$4" "; \
-      if ($5=="-" || $5==0)printf "- "; else printf "rttmin="$5" "; \
-      if ($6=="-" || $6==0)printf "- "; else printf "rttmax="$6" "; \
-      if ($7=="-" || $7==0)printf "- "; else printf "rttavg="$7" "; \
-      if ($8=="-" || $8==0)printf "- "; else printf "rtt50="$8" "; \
-      if ($9=="-" || $9==0)printf "- "; else printf "rtt75="$9" "; \
-      if ($10=="-" || $10==0)printf "- "; else printf "rtt90="$10" "; \
-      if ($11=="-" || $11==0)printf "- "; else printf "rtt95="$11" "; \
-      if ($12=="-" || $12==0)print "-"; else print "rtt99="$12}' $1 ) |column -t
+      if ($2=="-")printf "- "; else printf "requests="$2" "; \
+      if ($3=="-")printf "- "; else printf "errors="$3" "; \
+      if ($4=="-")printf "- "; else printf "rps="$4" "; \
+      if ($5=="-")printf "- "; else printf "rttmin="$5" "; \
+      if ($6=="-")printf "- "; else printf "rttmax="$6" "; \
+      if ($7=="-")printf "- "; else printf "rttavg="$7" "; \
+      if ($8=="-")printf "- "; else printf "rtt50="$8" "; \
+      if ($9=="-")printf "- "; else printf "rtt75="$9" "; \
+      if ($10=="-")printf "- "; else printf "rtt90="$10" "; \
+      if ($11=="-")printf "- "; else printf "rtt95="$11" "; \
+      if ($12=="-")print "-"; else print "rtt99="$12}' $1 ) |column -t
 }
 
 # Take a decimal or integer number and strip it to at most 2-digit precision
 stripdecimals() {
   read X
   echo $X |egrep -o '^[0-9]*\.?[0-9]?[0-9]?'
+}
+
+# round down to nearest integer
+toint() {
+  read X
+  echo "scale=0; ${X}/1" |bc
 }
 
 # Static-URL tests
@@ -120,7 +126,7 @@ apachebench_static() {
   echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _REQUESTS=`grep '^Complete\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
-  _RPS=`grep '^Requests\ per\ second:' ${RESULTS}/stdout.log |awk '{print $4}' |stripdecimals`
+  _RPS=`grep '^Requests\ per\ second:' ${RESULTS}/stdout.log |awk '{print $4}' |toint`
   _RTTAVG=`grep '^Time\ per\ request:' ${RESULTS}/stdout.log |grep '(mean)' |awk '{print $4}' |stripdecimals`
   _ERRORS=`grep '^Failed\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
   _RTTMIN="-"
@@ -149,17 +155,17 @@ wrk_static() {
   # not be used as our script decides what URL to load (which will of course be the same TARGETURL though)
   echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
   ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |stripdecimals`
+  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |toint`
   _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
   _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
   _ERRORS="-"
   _RTTMIN="-"
-  _RTTMAX=`grep -A 2 'Thread stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $4}' |duration2ms |stripdecimals`
-  _RTTp50=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="50%"{print $2}' |duration2ms |stripdecimals`
-  _RTTp75=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="75%"{print $2}' |duration2ms |stripdecimals`
-  _RTTp90=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="90%"{print $2}' |duration2ms |stripdecimals`
+  _RTTMAX=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $4}' |duration2ms |stripdecimals`
+  _RTTp50=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="50%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp75=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="75%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp90=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="90%"{print $2}' |duration2ms |stripdecimals`
   _RTTp95="-"
-  _RTTp99=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp99=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
@@ -177,18 +183,18 @@ boom_static() {
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _RPS=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Requests/sec:' |awk '{print $2}' |stripdecimals`
+  _RPS=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Requests/sec:' |awk '{print $2}' |toint`
   _DURATION=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Total:' |awk '{print $2}'`
-  _REQUESTS=`grep ' \[200\] ' ${RESULTS}/stdout.log |grep ' responses' |awk '{print $2}'`
-  _ERRORS=`grep -A 10 '^Status code distribution:' ${RESULTS}/stdout.log |grep -v ' \[200\] ' |grep ' responses' |awk 'BEGIN{tot=0}{tot=tot+$2}END{print tot}'`
-  _RTTMIN=`egrep 'Fastest: [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
-  _RTTMAX=`egrep 'Slowest: [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
-  _RTTAVG=`egrep 'Average: [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
-  _RTTp50=`egrep '50% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
-  _RTTp75=`egrep '75% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
-  _RTTp90=`egrep '90% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
-  _RTTp95=`egrep '95% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
-  _RTTp99=`egrep '99% in [0-9]*\.?[0-9]* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _REQUESTS=`grep '\[200\]' ${RESULTS}/stdout.log |grep ' responses' |awk '{print $2}'`
+  _ERRORS=`grep -A 10 '^Status code distribution:' ${RESULTS}/stdout.log |grep -v '\[200\]' |grep ' responses' |awk 'BEGIN{tot=0}{tot=tot+$2}END{print tot}'`
+  _RTTMIN=`egrep 'Fastest:.* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
+  _RTTMAX=`egrep 'Slowest:.* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
+  _RTTAVG=`egrep 'Average:.* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
+  _RTTp50=`egrep '50% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp75=`egrep '75% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp90=`egrep '90% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp95=`egrep '95% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
+  _RTTp99=`egrep '99% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
@@ -211,11 +217,11 @@ artillery_static() {
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc`
   _REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
-  _RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |stripdecimals`
+  _RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |toint`
   _OKAVG=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk 'BEGIN{tot=0;num=0}{num=num+1;tot=tot+$2}END{print num, tot/num}'`
   _OK=`echo "${_OKAVG}" |awk '{print $1}'`
   _RTTAVG=`echo "${_OKAVG}" |awk '{print $2}'`
-  _ERRORS=`expr ${_REQUESTS}-${_OK}`
+  _ERRORS=`expr ${_REQUESTS} - ${_OK}`
   _RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2}'`
   _RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2}'`
   _RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2}'`
@@ -242,7 +248,7 @@ vegeta_static() {
   echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
   echo "GET ${TARGETURL}" |vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s |vegeta report > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _REQUESTS=`grep '^Requests' ${RESULTS}/stdout.log |awk '{print $4}' |cut -d\, -f1 |awk '{print $1}'`
-  _RPS=`grep '^Requests' ${RESULTS}/stdout.log |awk '{print $5}' |stripdecimals`
+  _RPS=`grep '^Requests' ${RESULTS}/stdout.log |awk '{print $5}' |toint`
   _RTTAVG=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $7}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
   _RTTp50=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $8}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
   _RTTp95=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $9}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
@@ -275,7 +281,7 @@ siege_static() {
   # that it will write the log to /var/log/siege.log. Very useful...)
   mv -f /var/log/siege.log ${RESULTS}
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`
-  _RPS=`grep '^Transaction rate:' ${RESULTS}/stderr.log |awk '{print $3}' |stripdecimals`
+  _RPS=`grep '^Transaction rate:' ${RESULTS}/stderr.log |awk '{print $3}' |toint`
   _RTT_SECS=`grep '^Response time:' ${RESULTS}/stderr.log |awk '{print $3}'`
   #
   # Siege reports response time in seconds, with only 2 decimals of precision. In a benchmark it is not unlikely
@@ -328,7 +334,7 @@ tsung_static() {
   else
     _REQUESTS=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $9}'`
   fi
-  _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |stripdecimals`
+  _RPS=`echo "scale=0; ${_REQUESTS}/${_DURATION};" |bc`
   _ERRORS="-"
   _RTTMAX=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $6}' |stripdecimals`
   _RTTMIN=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $7}' |stripdecimals`
@@ -360,7 +366,7 @@ jmeter_static() {
   echo "${TESTNAME}: Executing jmeter -n -t ${CFG} ... "
   ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _REQUESTS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $3}'`
-  _RPS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $7}' |cut -d\/ -f1 |stripdecimals`
+  _RPS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $7}' |cut -d\/ -f1 |toint`
   _RTTAVG=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $9}' |stripdecimals`
   _RTTMIN=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $11}' |stripdecimals`
   _RTTMAX=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $13}' |stripdecimals`
@@ -396,7 +402,7 @@ locust_scripting() {
   _END=`date +%s.%N`
   _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $2}'`
   # Locust RPS reporting is not reliable for short test durations (it can report 0 RPS)
-  _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $4}' |stripdecimals`
+  _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $4}' |toint`
   if [ "${_RPS}x" = "0.00x" ]; then
     # Calculate some average RPS instead
     _DURATION=`echo "${_END}-${_START}" |bc`
@@ -452,7 +458,7 @@ grinder_scripting() {
   # How many requests did we see
   _REQUESTS=`wc -l ${TMP} |awk '{print $1}'`
   # Calculate RPS. We assume we ran for the exact DURATION.
-  _RPS=`echo "scale=2; x=${_REQUESTS}/${DURATION}; if (x<1) print 0; x" |bc |stripdecimals`
+  _RPS=`echo "scale=0; ${_REQUESTS}/${DURATION};" |bc`
   # Calculate the average for all the response times. 
   _RTTAVG=`awk 'BEGIN{num=0;tot=0}{num=num+1;tot=tot+$1}END{print tot/num}' ${TMP} |stripdecimals`
   _ERRORS="-"
@@ -499,7 +505,7 @@ wrk_scripting() {
   replace_all ${TESTDIR}/configs/wrk.lua ${CFG}
   echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} ... "
   ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |stripdecimals`
+  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |toint`
   _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
   _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
   _ERRORS="-"

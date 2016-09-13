@@ -8,7 +8,7 @@ ENV TESTDIR /loadgentests
 RUN mkdir ${TESTDIR}
 
 # C compiler, make, libssl, autoconf, etc
-RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip wget git python-pip python-dev python-zmq bc bsdmainutils
+RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip wget git python-pip python-dev python-zmq bc bsdmainutils jq
 
 # Update nodejs
 RUN npm cache clean -f
