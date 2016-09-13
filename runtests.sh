@@ -16,6 +16,7 @@ checkfor cp
 checkfor mv
 checkfor rm
 checkfor bc
+checkfor jq
 checkfor tee
 checkfor awk
 checkfor sed
@@ -211,18 +212,17 @@ artillery_static() {
   _DURATION=`echo "${_END}-${_START}" |bc`
   _REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
   _RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |stripdecimals`
-  #export ARTILLERY_RTTMED=`grep -A 20 '^Complete report @' stdout.log |grep -A 5 'Request latency:' |grep "median:" |awk '{print $2}'`
-  # Artillery only reports median RTT, so we attempt to calculate the average here
-  # TODO: Use the artillery_report.json logfile that contains individual transaction times, to calculate average RTT
-  _RTTAVG=`echo "scale=2; x=1000/((${_REQUESTS}/${CONCURRENT})/${_DURATION}); if (x<1) print 0; x" |bc |stripdecimals`
-  _ERRORS="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
+  _OKAVG=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk 'BEGIN{tot=0;num=0}{num=num+1;tot=tot+$2}END{print num, tot/num}'`
+  _OK=`echo "${_OKAVG}" |awk '{print $1}'`
+  _RTTAVG=`echo "${_OKAVG}" |awk '{print $2}'`
+  _ERRORS=`expr ${_REQUESTS}-${_OK}`
+  _RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2}'`
+  _RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2}'`
+  _RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2}'`
   _RTTp75="-"
   _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _RTTp95=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p95: ' |awk '{print $2}'`
+  _RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2}'`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
@@ -244,14 +244,16 @@ vegeta_static() {
   _REQUESTS=`grep '^Requests' ${RESULTS}/stdout.log |awk '{print $4}' |cut -d\, -f1 |awk '{print $1}'`
   _RPS=`grep '^Requests' ${RESULTS}/stdout.log |awk '{print $5}' |stripdecimals`
   _RTTAVG=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $7}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
+  _RTTp50=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $8}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
+  _RTTp95=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $9}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
+  _RTTp99=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $10}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
+  _RTTMAX=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $11}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
+  # XXX TODO: Vegeta reports on response codes seen - we can parse that output and report # of errors also
+  # (although it doesn't seem to report redirect responses, which makes it hard to compare results w other tools)
   _ERRORS="-"
   _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
   _RTTp75="-"
   _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
@@ -269,18 +271,28 @@ siege_static() {
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing siege -b -t ${DURATION}S -q -c ${CONCURRENT} ${TARGETURL} ... "
   siege -b -t ${DURATION}S -q -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  # Doesnt seem possible to tell siege where to write its logfile
+  # Doesnt seem possible to tell siege where to write its logfile (but you can provide an option to *tell it not to tell you*
+  # that it will write the log to /var/log/siege.log. Very useful...)
   mv -f /var/log/siege.log ${RESULTS}
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`
   _RPS=`grep '^Transaction rate:' ${RESULTS}/stderr.log |awk '{print $3}' |stripdecimals`
   _RTT_SECS=`grep '^Response time:' ${RESULTS}/stderr.log |awk '{print $3}'`
+  #
   # Siege reports response time in seconds, with only 2 decimals of precision. In a benchmark it is not unlikely
   # you will see it report 0.00s response times, or response times that never change. Given this lack of precision 
   # it may perhaps be better to calculate average response time, like we do for Artillery?
+  #
+  # Just like Vegeta, Siege does not report redirect responses. When redirects happen, they are considered part of a
+  # "successful transaction". This means that when Siege is aimed at a URL that redirects, you will see it report 
+  # e.g. "Transactions: 551 hits" and "Successful transactions: 488". This may look like some transactions failed, but
+  # if it also says "Failed transactions: 0", the missing transactions are redirects that never had time to complete.
+  # Interestingly, the siege.log file reports things differently from what siege sends to stdout. In that file,
+  # it reports that "Trans=551", "OKAY=551", "Failed=0".
+  #
   _RTTAVG=`echo "${_RTT_SECS}*1000" |bc |stripdecimals`
   _ERRORS="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
+  _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $2*1000}'`
+  _RTTMAX=`grep '^Longest transaction:' ${RESULTS}/stderr.log |awk '{print $2*1000}'`
   _RTTp50="-"
   _RTTp75="-"
   _RTTp90="-"
@@ -318,8 +330,11 @@ tsung_static() {
   fi
   _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |stripdecimals`
   _ERRORS="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
+  _RTTMAX=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $6}' |stripdecimals`
+  _RTTMIN=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $7}' |stripdecimals`
+  # Tsung can be run with a backend="fullstats" mode, that will make it log timings per individual
+  # transaction, but the docs warn about the performance hit this means. We are not using that 
+  # mode for this benchmarking, which means statistics are a bit limited.
   _RTTp50="-"
   _RTTp75="-"
   _RTTp90="-"
@@ -347,9 +362,9 @@ jmeter_static() {
   _REQUESTS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $3}'`
   _RPS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $7}' |cut -d\/ -f1 |stripdecimals`
   _RTTAVG=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $9}' |stripdecimals`
-  _ERRORS="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
+  _RTTMIN=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $11}' |stripdecimals`
+  _RTTMAX=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $13}' |stripdecimals`
+  _ERRORS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $15}' |stripdecimals`
   _RTTp50="-"
   _RTTp75="-"
   _RTTp90="-"
