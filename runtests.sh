@@ -17,6 +17,8 @@ checkfor mv
 checkfor rm
 checkfor bc
 checkfor jq
+checkfor wc
+checkfor cat
 checkfor tee
 checkfor awk
 checkfor sed
@@ -63,23 +65,35 @@ replace_all() {
 }
 
 # utility func to interpret "Xs", "Xms", "Xus", "Xns" durations and translate them to ms
-# with max 2 decimals of precision (depending on the precision of the original number)
+# with max 2 decimals of precision (depending on the precision of the original number -
+# i.e. "0.3s" becomes "300" [ms] but not "300.00" because that implies more precision
+# in the original number than we actually have)
 duration2ms() {
   read X
   UNIT=`echo $X |egrep -o '[mun]?s'`
-  NUM=`echo $X |sed 's/'${UNIT}'//'`
-  PRECISION=`echo "scale(${NUM})" |bc`
-  if [ "${UNIT}x" = "sx" -o "${UNIT}x" = "x" ]; then
+  if [ "${UNIT}x" = "x" ] ; then
+    NUM=$X
+  else
+    NUM=`echo $X |sed 's/'${UNIT}'//'`
+  fi
+  PRECISION=`echo "scale(${NUM})" |bc -l`
+  if [ "${UNIT}x" = "sx" -o "${UNIT}x" = "x" ] ; then
     # Seconds
-    echo "scale=${PRECISION}-3; if (scale<0) scale=0; if (scale>2) scale=2; x=${NUM}*1000; if (x<1) print 0; x" |bc
-  elif [ "${UNIT}x" = "msx" ]; then
-    echo "scale=${PRECISION}; if (scale>2) scale=2; x=${NUM}/1; if (x<1) print 0; x" |bc`
-  elif [ "${UNIT}x" = "usx" ]; then
-    echo "scale=2; x=${NUM}/1000; if (x<1) print 0; x" |bc
-  elif [ "${UNIT}x" = "nsx" ]; then
-    echo "scale=2; x=${NUM}/1000000; if (x<1) print 0; x" |bc
+    OUTPUT=`echo "if (${PRECISION}<3) scale=0; if (${PRECISION}>=3) scale=${PRECISION}-3; if (scale>2) scale=2; x=${NUM}/0.001; if (x<1) print 0; x" |bc -l`
+  elif [ "${UNIT}x" = "msx" ] ; then
+    OUTPUT=`echo "scale=${PRECISION}; if (scale>2) scale=2; x=${NUM}/1; if (x<1) print 0; x" |bc -l`
+  elif [ "${UNIT}x" = "usx" ] ; then
+    OUTPUT=`echo "scale=2; x=${NUM}/1000; if (x<1) print 0; x" |bc -l`
+  elif [ "${UNIT}x" = "nsx" ] ; then
+    OUTPUT=`echo "scale=2; x=${NUM}/1000000; if (x<1) print 0; x" |bc -l`
   else
     echo "error: unknown unit in duration: ${1}"
+    return 1
+  fi
+  if [ `echo "${OUTPUT}==0" |bc` -eq 1 ] ; then
+    echo "-"
+  else
+    echo ${OUTPUT}
   fi
 }
 
@@ -90,19 +104,21 @@ duration2ms() {
 report() {
   ( if [ $# -gt 1 ]; then
       echo "$2"
-    fi
-    awk '{printf $1" "; \
-      if ($2=="-")printf "- "; else printf "requests="$2" "; \
-      if ($3=="-")printf "- "; else printf "errors="$3" "; \
-      if ($4=="-")printf "- "; else printf "rps="$4" "; \
-      if ($5=="-")printf "- "; else printf "rttmin="$5" "; \
-      if ($6=="-")printf "- "; else printf "rttmax="$6" "; \
-      if ($7=="-")printf "- "; else printf "rttavg="$7" "; \
-      if ($8=="-")printf "- "; else printf "rtt50="$8" "; \
-      if ($9=="-")printf "- "; else printf "rtt75="$9" "; \
-      if ($10=="-")printf "- "; else printf "rtt90="$10" "; \
-      if ($11=="-")printf "- "; else printf "rtt95="$11" "; \
-      if ($12=="-")print "-"; else print "rtt99="$12}' $1 ) |column -t
+      cat $1
+    else
+      awk '{printf $1" "; \
+        if ($2=="-")printf "- "; else printf "requests="$2" "; \
+        if ($3=="-")printf "- "; else printf "errors="$3" "; \
+        if ($4=="-")printf "- "; else printf "rps="$4" "; \
+        if ($5=="-")printf "- "; else printf "rttmin="$5" "; \
+        if ($6=="-")printf "- "; else printf "rttmax="$6" "; \
+        if ($7=="-")printf "- "; else printf "rttavg="$7" "; \
+        if ($8=="-")printf "- "; else printf "rtt50="$8" "; \
+        if ($9=="-")printf "- "; else printf "rtt75="$9" "; \
+        if ($10=="-")printf "- "; else printf "rtt90="$10" "; \
+        if ($11=="-")printf "- "; else printf "rtt95="$11" "; \
+        if ($12=="-")print "-"; else print "rtt99="$12}' $1
+    fi ) |column -t
 }
 
 # Take a decimal or integer number and strip it to at most 2-digit precision
@@ -134,11 +150,11 @@ apachebench_static() {
   _ERRORS=`grep '^Failed\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
   _RTTMIN="-"
   _RTTMAX="-"
-  _RTTp50=`grep '^50,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
-  _RTTp75=`grep '^75,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
-  _RTTp90=`grep '^90,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
-  _RTTp95=`grep '^95,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
-  _RTTp99=`grep '^99,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
+  _RTTp50=`grep '^50,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
+  _RTTp75=`grep '^75,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
+  _RTTp90=`grep '^90,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
+  _RTTp95=`grep '^95,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
+  _RTTp99=`grep '^99,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -221,10 +237,11 @@ artillery_static() {
   _DURATION=`echo "${_END}-${_START}" |bc`
   _REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
   _RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |toint`
-  _OKAVG=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk 'BEGIN{tot=0;num=0}{num=num+1;tot=tot+$2}END{print num, tot/num}'`
-  _OK=`echo "${_OKAVG}" |awk '{print $1}'`
-  _RTTAVG=`echo "${_OKAVG}" |awk '{print $2}'`
-  _ERRORS=`expr ${_REQUESTS} - ${_OK}`
+  _OKNUM=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |wc -l`
+  _OKRTTTOT=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk '{print $2}' |paste -sd+ |bc -l`
+  _RTTAVGNS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l`
+  _RTTAVG=`echo "${_RTTAVGNS}ns" |duration2ms`
+  _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
   _RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2}'`
   _RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2}'`
   _RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2}'`
@@ -249,16 +266,19 @@ vegeta_static() {
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
-  echo "GET ${TARGETURL}" |vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s |vegeta report > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _REQUESTS=`grep '^Requests' ${RESULTS}/stdout.log |awk '{print $4}' |cut -d\, -f1 |awk '{print $1}'`
-  _RPS=`grep '^Requests' ${RESULTS}/stdout.log |awk '{print $5}' |toint`
-  _RTTAVG=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $7}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
-  _RTTp50=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $8}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
-  _RTTp95=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $9}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
-  _RTTp99=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $10}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
-  _RTTMAX=`grep '^Latencies' ${RESULTS}/stdout.log |awk '{print $11}' |egrep -o '[0-9]*\.?[0-9]*' |stripdecimals`
-  # XXX TODO: Vegeta reports on response codes seen - we can parse that output and report # of errors also
-  # (although it doesn't seem to report redirect responses, which makes it hard to compare results w other tools)
+  echo "GET ${TARGETURL}" |vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s |vegeta report -reporter json > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _REQUESTS=`jq '.requests' ${RESULTS}/stdout.log`
+  _RPS=`jq '.rate' ${RESULTS}/stdout.log |toint`
+  _RTTAVGNS=`jq '.latencies["mean"]' ${RESULTS}/stdout.log`
+  _RTTAVG=`echo "${_RTTAVGNS}ns" |duration2ms`
+  _RTTp50NS=`jq '.latencies["50th"]' ${RESULTS}/stdout.log`
+  _RTTp50=`echo "${_RTTp50NS}ns" |duration2ms`
+  _RTTp95NS=`jq '.latencies["95th"]' ${RESULTS}/stdout.log`
+  _RTTp95=`echo "${_RTTp95NS}ns" |duration2ms`
+  _RTTp99NS=`jq '.latencies["99th"]' ${RESULTS}/stdout.log`
+  _RTTp99=`echo "${_RTTp99NS}ns" |duration2ms`
+  _RTTMAXNS=`jq '.latencies["max"]' ${RESULTS}/stdout.log`
+  _RTTMAX=`echo "${_RTTMAXNS}ns" |duration2ms`
   _ERRORS="-"
   _RTTMIN="-"
   _RTTp75="-"
@@ -285,11 +305,11 @@ siege_static() {
   mv -f /var/log/siege.log ${RESULTS}
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`
   _RPS=`grep '^Transaction rate:' ${RESULTS}/stderr.log |awk '{print $3}' |toint`
-  _RTT_SECS=`grep '^Response time:' ${RESULTS}/stderr.log |awk '{print $3}'`
   #
   # Siege reports response time in seconds, with only 2 decimals of precision. In a benchmark it is not unlikely
   # you will see it report 0.00s response times, or response times that never change. Given this lack of precision 
   # it may perhaps be better to calculate average response time, like we do for Artillery?
+  _RTTAVG=`grep '^Response time:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
   #
   # Just like Vegeta, Siege does not report redirect responses. When redirects happen, they are considered part of a
   # "successful transaction". This means that when Siege is aimed at a URL that redirects, you will see it report 
@@ -298,10 +318,9 @@ siege_static() {
   # Interestingly, the siege.log file reports things differently from what siege sends to stdout. In that file,
   # it reports that "Trans=551", "OKAY=551", "Failed=0".
   #
-  _RTTAVG=`echo "${_RTT_SECS}*1000" |bc |stripdecimals`
   _ERRORS="-"
-  _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $2*1000}'`
-  _RTTMAX=`grep '^Longest transaction:' ${RESULTS}/stderr.log |awk '{print $2*1000}'`
+  _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $3*1000}'`
+  _RTTMAX=`grep '^Longest transaction:' ${RESULTS}/stderr.log |awk '{print $3*1000}'`
   _RTTp50="-"
   _RTTp75="-"
   _RTTp90="-"
@@ -548,9 +567,9 @@ staticurltests() {
       ${LOGDIR}/jmeter_static/timings \
       >${LOGDIR}/staticurltests.timings
   echo ""
-  echo "------------------------------------------------- Static URL test results --------------------------------------------------"
+  echo "------------------------------------------------------ Static URL test results --------------------------------------------------------"
   report ${LOGDIR}/staticurltests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
-  echo "----------------------------------------------------------------------------------------------------------------------------"
+  echo "---------------------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
 
@@ -566,9 +585,9 @@ scriptingtests() {
       ${LOGDIR}/wrk_scripting/timings \
       >${LOGDIR}/scriptingtests.timings
   echo ""
-  echo "------------------------------------------------- Scripting test results --------------------------------------------------"
+  echo "------------------------------------------------------ Scripting test results --------------------------------------------------------"
   report ${LOGDIR}/scriptingtests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
-  echo "---------------------------------------------------------------------------------------------------------------------------"
+  echo "--------------------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
 
@@ -581,9 +600,9 @@ alltests() {
       ${LOGDIR}/scriptingtests.timings \
       >${LOGDIR}/alltests.timings
   echo ""
-  echo "---------------------------------------------------- All test results -----------------------------------------------------"
+  echo "--------------------------------------------------------- All test results -----------------------------------------------------------"
   report ${LOGDIR}/alltests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
-  echo "---------------------------------------------------------------------------------------------------------------------------"
+  echo "--------------------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
 
