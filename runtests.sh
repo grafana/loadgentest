@@ -63,18 +63,21 @@ replace_all() {
 }
 
 # utility func to interpret "Xs", "Xms", "Xus", "Xns" durations and translate them to ms
+# with max 2 decimals of precision (depending on the precision of the original number)
 duration2ms() {
   read X
   UNIT=`echo $X |egrep -o '[mun]?s'`
   NUM=`echo $X |sed 's/'${UNIT}'//'`
-  if [ "${UNIT}x" = "sx" ]; then
-    echo "${NUM}*1000" |bc
+  PRECISION=`echo "scale(${NUM})" |bc`
+  if [ "${UNIT}x" = "sx" -o "${UNIT}x" = "x" ]; then
+    # Seconds
+    echo "scale=${PRECISION}-3; if (scale<0) scale=0; if (scale>2) scale=2; x=${NUM}*1000; if (x<1) print 0; x" |bc
+  elif [ "${UNIT}x" = "msx" ]; then
+    echo "scale=${PRECISION}; if (scale>2) scale=2; x=${NUM}/1; if (x<1) print 0; x" |bc`
   elif [ "${UNIT}x" = "usx" ]; then
     echo "scale=2; x=${NUM}/1000; if (x<1) print 0; x" |bc
   elif [ "${UNIT}x" = "nsx" ]; then
     echo "scale=2; x=${NUM}/1000000; if (x<1) print 0; x" |bc
-  elif [ "${UNIT}x" = "msx" ]; then
-    echo ${NUM}
   else
     echo "error: unknown unit in duration: ${1}"
   fi
@@ -138,7 +141,7 @@ apachebench_static() {
   _RTTp99=`grep '^99,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}'`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -155,7 +158,7 @@ wrk_static() {
   # not be used as our script decides what URL to load (which will of course be the same TARGETURL though)
   echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
   ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |toint`
+  _RPS=`grep '^Requests/sec:' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
   _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
   _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
   _ERRORS="-"
@@ -168,7 +171,7 @@ wrk_static() {
   _RTTp99=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -197,7 +200,7 @@ boom_static() {
   _RTTp99=`egrep '99% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -231,7 +234,7 @@ artillery_static() {
   _RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2}'`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -262,7 +265,7 @@ vegeta_static() {
   _RTTp90="-"
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -306,7 +309,7 @@ siege_static() {
   _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -348,7 +351,7 @@ tsung_static() {
   _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -378,7 +381,7 @@ jmeter_static() {
   _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -419,7 +422,7 @@ locust_scripting() {
   _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -471,7 +474,7 @@ grinder_scripting() {
   _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -489,7 +492,7 @@ gatling_scripting() {
   # TODO - fix Gatlings tricky config setup...  
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -518,7 +521,7 @@ wrk_scripting() {
   _RTTp99=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -546,7 +549,7 @@ staticurltests() {
       >${LOGDIR}/staticurltests.timings
   echo ""
   echo "------------------------------------------------- Static URL test results --------------------------------------------------"
-  report ${LOGDIR}/staticurltests.timings "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${LOGDIR}/staticurltests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "----------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
@@ -564,7 +567,7 @@ scriptingtests() {
       >${LOGDIR}/scriptingtests.timings
   echo ""
   echo "------------------------------------------------- Scripting test results --------------------------------------------------"
-  report ${LOGDIR}/scriptingtests.timings "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${LOGDIR}/scriptingtests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "---------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
@@ -579,7 +582,7 @@ alltests() {
       >${LOGDIR}/alltests.timings
   echo ""
   echo "---------------------------------------------------- All test results -----------------------------------------------------"
-  report ${LOGDIR}/alltests.timings "Testname Requests Errors RPS RTTMIN RTTMAX RTTAVG RTT50 RTT75 RTT90 RTT95 RTT99"
+  report ${LOGDIR}/alltests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "---------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
