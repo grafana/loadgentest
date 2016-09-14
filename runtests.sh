@@ -97,6 +97,15 @@ duration2ms() {
   fi
 }
 
+percentile() {
+  PCT=$1
+  TMPFILE=/tmp/percentile.$$.sorted
+  sort -n >$TMPFILE
+  LINES=`wc -l ${TMPFILE}`
+  TARGETLINE=`echo "scale=0; (${PCT}*${LINES})/100`
+  awk 'NR=='${TARGETLINE}'{print $1}'
+}
+
 # 1 param: filename containing test data from one or more tests, in this format:
 # TESTNAME, REQUESTS, ERRORS, RPS, RTTMIN, RTTMAX, RTTAVG(mean), RTTp50(median), RTTp75, RTTp90, RTTp95, RTTp99
 # Use "-" if there is no result for that param
@@ -319,8 +328,8 @@ siege_static() {
   # it reports that "Trans=551", "OKAY=551", "Failed=0".
   #
   _ERRORS="-"
-  _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $3*1000}'`
-  _RTTMAX=`grep '^Longest transaction:' ${RESULTS}/stderr.log |awk '{print $3*1000}'`
+  _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
+  _RTTMAX=`grep '^Longest transaction:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
   _RTTp50="-"
   _RTTp75="-"
   _RTTp90="-"
@@ -385,11 +394,15 @@ jmeter_static() {
   CFG=${TESTDIR}/configs/jmeter_${STARTTIME}.xml
   # TODO: support for protocols other than plain HTTP... we dont specify protocol in the test plan ATM
   replace_all ${TESTDIR}/configs/jmeter.xml ${CFG}
-  echo "${TESTNAME}: Executing jmeter -n -t ${CFG} ... "
-  ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  JMETERLOG=${RESULTS}/jmeter.log
+  TXLOG=${RESULTS}/transactions.csv
+  # useNanoTime=true doesn't seem to work
+  echo "${TESTNAME}: Executing jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true ... "
+  ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _REQUESTS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $3}'`
   _RPS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $7}' |cut -d\/ -f1 |toint`
-  _RTTAVG=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $9}' |stripdecimals`
+  _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$13}END{printf "%.2f", tot/num}' ${TXLOG}`
+  #_RTTAVG=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $9}' |stripdecimals`
   _RTTMIN=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $11}' |stripdecimals`
   _RTTMAX=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $13}' |stripdecimals`
   _ERRORS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $15}' |stripdecimals`
