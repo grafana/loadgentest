@@ -112,7 +112,7 @@ percentile() {
 }
 
 # param 1: filename containing test data from one or more tests, in this format:
-# TESTNAME, REQUESTS, ERRORS, RPS, RTTMIN, RTTMAX, RTTAVG(mean), RTTp50(median), RTTp75, RTTp90, RTTp95, RTTp99
+# TESTNAME RUNTIME REQUESTS ERRORS RPS RTTMIN RTTMAX RTTAVG(mean) RTTp50(median) RTTp75 RTTp90 RTTp95 RTTp99
 # Use "-" if there is no result for that param
 # optional 2nd param is a header to also be sent to column
 report() {
@@ -121,17 +121,18 @@ report() {
       cat $1
     else
       awk '{printf $1" "; \
-        if ($2=="-")printf "- "; else printf "requests="$2" "; \
-        if ($3=="-")printf "- "; else printf "errors="$3" "; \
-        if ($4=="-")printf "- "; else printf "rps="$4" "; \
-        if ($5=="-")printf "- "; else printf "rttmin="$5" "; \
-        if ($6=="-")printf "- "; else printf "rttmax="$6" "; \
-        if ($7=="-")printf "- "; else printf "rttavg="$7" "; \
-        if ($8=="-")printf "- "; else printf "rtt50="$8" "; \
-        if ($9=="-")printf "- "; else printf "rtt75="$9" "; \
-        if ($10=="-")printf "- "; else printf "rtt90="$10" "; \
-        if ($11=="-")printf "- "; else printf "rtt95="$11" "; \
-        if ($12=="-")print "-"; else print "rtt99="$12}' $1
+        if ($2=="-")printf "- "; else printf "runtime="$2" "; \
+        if ($3=="-")printf "- "; else printf "requests="$3" "; \
+        if ($4=="-")printf "- "; else printf "errors="$4" "; \
+        if ($5=="-")printf "- "; else printf "rps="$5" "; \
+        if ($6=="-")printf "- "; else printf "rttmin="$6" "; \
+        if ($7=="-")printf "- "; else printf "rttmax="$7" "; \
+        if ($8=="-")printf "- "; else printf "rttavg="$8" "; \
+        if ($9=="-")printf "- "; else printf "rtt50="$9" "; \
+        if ($10=="-")printf "- "; else printf "rtt75="$10" "; \
+        if ($11=="-")printf "- "; else printf "rtt90="$11" "; \
+        if ($12=="-")printf "- "; else printf "rtt95="$12" "; \
+        if ($13=="-")print "-"; else print "rtt99="$13}' $1
     fi ) |column -t
 }
 
@@ -156,7 +157,10 @@ apachebench_static() {
   TIMINGS="${RESULTS}/timings"
   PERCENTAGES=${RESULTS}/percentages
   echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  _START=`date +%s.%N`
   ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Complete\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
   _RPS=`grep '^Requests\ per\ second:' ${RESULTS}/stdout.log |awk '{print $4}' |toint`
   _RTTAVG=`grep '^Time\ per\ request:' ${RESULTS}/stdout.log |grep '(mean)' |awk '{print $4}' |stripdecimals`
@@ -169,8 +173,8 @@ apachebench_static() {
   _RTTp95=`grep '^95,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
   _RTTp99=`grep '^99,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -186,7 +190,10 @@ wrk_static() {
   # Note that we supply TARGETURL on the cmd line as wrk requires that, but the cmd line parameter will
   # not be used as our script decides what URL to load (which will of course be the same TARGETURL though)
   echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
+  _START=`date +%s.%N`
   ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
   _RPS=`grep '^Requests/sec:' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
   _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
   _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
@@ -199,8 +206,8 @@ wrk_static() {
   _RTTp95="-"
   _RTTp99=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -228,8 +235,8 @@ boom_static() {
   _RTTp95=`egrep '95% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
   _RTTp99=`egrep '99% in .* secs$' ${RESULTS}/stdout.log |awk '{print $3*1000}' |stripdecimals`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -247,7 +254,7 @@ artillery_static() {
   _START=`date +%s.%N`
   artillery quick --count ${CONCURRENT} -n ${REQS_PER_VU} -o ${RESULTS}/artillery_report.json ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
-  _DURATION=`echo "${_END}-${_START}" |bc`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
   _RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |toint`
   _OKNUM=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |wc -l`
@@ -263,8 +270,8 @@ artillery_static() {
   _RTTp95=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p95: ' |awk '{print $2}'`
   _RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2}'`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -280,7 +287,19 @@ vegeta_static() {
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
+  _START=`date +%s.%N`
   echo "GET ${TARGETURL}" |vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s |vegeta report -reporter json > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  #
+  # Vegeta does not report redirect responses, like many other tools. But this means that considering any
+  # reported response codes !=200 to be errors is not completely stupid.
+  #
+  # XXX TODO: Find out how Vegeta is able to generate 4000 RPS over a 10ms RTT network connection
+  # when using 20 concurrent connections. It should be impossible. Theoretical max is 20x(1/0.01) => 2000 RPS
+  # Either the concurrent connections limit is not working, or Vegeta is using HTTP/2 and sending many
+  # requests at once.
+  #
   _REQUESTS=`jq '.requests' ${RESULTS}/stdout.log`
   _RPS=`jq '.rate' ${RESULTS}/stdout.log |toint`
   _RTTAVGNS=`jq '.latencies["mean"]' ${RESULTS}/stdout.log`
@@ -293,13 +312,14 @@ vegeta_static() {
   _RTTp99=`echo "${_RTTp99NS}ns" |duration2ms`
   _RTTMAXNS=`jq '.latencies["max"]' ${RESULTS}/stdout.log`
   _RTTMAX=`echo "${_RTTMAXNS}ns" |duration2ms`
-  _ERRORS="-"
+  _OKREQUESTS=`jq '.status_codes["200"]' ${RESULTS}/stdout.log`
+  _ERRORS=`expr ${_REQUESTS} - ${_OKREQUESTS}`
   _RTTMIN="-"
   _RTTp75="-"
   _RTTp90="-"
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -313,7 +333,10 @@ siege_static() {
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing siege -b -t ${DURATION}S -q -c ${CONCURRENT} ${TARGETURL} ... "
+  _START=`date +%s.%N`
   siege -b -t ${DURATION}S -q -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Doesnt seem possible to tell siege where to write its logfile (but you can provide an option to *tell it not to tell you*
   # that it will write the log to /var/log/siege.log. Very useful...)
   mv -f /var/log/siege.log ${RESULTS}
@@ -341,8 +364,8 @@ siege_static() {
   _RTTp95="-"
   _RTTp99="-"
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -361,7 +384,7 @@ tsung_static() {
   _START=`date +%s.%N`
   tsung -l ${RESULTS} -f ${CFG} start > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
-  _DURATION=`echo "${_END}-${_START}" |bc`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _LOGDIR=`grep '^Log directory is:' ${RESULTS}/stdout.log |awk '{print $4}'`
   _RTTAVG=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $8}' |stripdecimals`
   if [ "${_RTTAVG}x" = "0x" ]; then
@@ -371,7 +394,12 @@ tsung_static() {
     _REQUESTS=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $9}'`
   fi
   _RPS=`echo "scale=0; ${_REQUESTS}/${_DURATION};" |bc`
-  _ERRORS="-"
+  # 
+  # Tsung actually bothers to correctly report 3xx redirect responses (as opposed to many other tools)
+  # So we only count something as an "error" if the response code is less than 200 or 400+
+  #
+  _OKREQUESTS=`awk -F\; 'BEGIN{num=0}NR>1{if ($7>=200 && $7<400) num=num+1}END{print num}' ${_LOGDIR}/tsung.dump`
+  _ERRORS=`expr ${_REQUESTS} - ${_OKREQUESTS}`
   _RTTMAX=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $6}' |stripdecimals`
   _RTTMIN=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $7}' |stripdecimals`
   _RTTp50=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 50 |stripdecimals`
@@ -380,8 +408,8 @@ tsung_static() {
   _RTTp95=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 95 |stripdecimals`
   _RTTp99=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 99 |stripdecimals`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -403,11 +431,13 @@ jmeter_static() {
   # useNanoTime=true doesn't seem to work. I'm probably doing something wrong.
   #
   echo "${TESTNAME}: Executing jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true ... "
+  _START=`date +%s.%N`
   ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $3}'`
   _RPS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $7}' |cut -d\/ -f1 |toint`
   _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$13}END{printf "%.2f", tot/num}' ${TXLOG}`
-  #_RTTAVG=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $9}' |stripdecimals`
   _RTTMIN=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $11}' |stripdecimals`
   _RTTMAX=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $13}' |stripdecimals`
   _ERRORS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $15}' |stripdecimals`
@@ -417,8 +447,8 @@ jmeter_static() {
   _RTTp95=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 95`
   _RTTp99=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 99`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -440,18 +470,18 @@ locust_scripting() {
   echo "${TESTNAME}: Executing locust --host=\"http://${_TARGETHOST}\" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
   locust --host="http://${_TARGETHOST}" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $2}'`
+  _ERRORS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $3}' |cut -d\( -f1`
   # Locust RPS reporting is not reliable for short test durations (it can report 0 RPS)
   _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $4}' |toint`
   if [ "${_RPS}x" = "0.00x" ]; then
     # Calculate some average RPS instead
-    _DURATION=`echo "${_END}-${_START}" |bc`
     _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |stripdecimals`
   fi
   _RTTAVG=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $5}' |stripdecimals`
-  _ERRORS="-"
   _RTTMIN="-"
-  _PATH=/`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\/// |cut -d\/ -f2-'`
+  _PATH=/`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f2-`
   _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $12}'`
   _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $4}'`
   _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $6}'`
@@ -459,8 +489,8 @@ locust_scripting() {
   _RTTp95=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $9}'`
   _RTTp99=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $11}'`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -487,7 +517,10 @@ grinder_scripting() {
   cd ${TESTDIR}/configs
   export CLASSPATH=/loadgentests/grinder-3.11/lib/grinder.jar
   echo "${TESTNAME}: Executing java net.grinder.Grinder ${CFG2} ... "
+  _START=`date +%s.%N`
   java net.grinder.Grinder ${CFG2} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Grinder only logs durations for individual requests. I don't think there is any simple way of making it
   # output aggregated statistics to the console, so we have to first find out what our workers are called
   TMP=${RESULTS}/_metrics.`date +%s`
@@ -498,11 +531,14 @@ grinder_scripting() {
   done
   # How many requests did we see
   _REQUESTS=`wc -l ${TMP} |awk '{print $1}'`
+  # Grinder also reports redirects correctly, so here also we will count transactions as "errors"
+  # if the error column was not "0" or if the response code was outside the 200..399 range
+  _OKREQUESTS=`sed 's/\,//g' ${RESULTS}/*data.log |grep -v Thread |awk 'BEGIN{num=0}NR>1{if ($6==0 && ($7>=200 && $7<400)) num=num+1}END{print num}'`
+  _ERRORS=`expr ${_REQUESTS} - ${_OKREQUESTS}`
   # Calculate RPS. We assume we ran for the exact DURATION.
   _RPS=`echo "scale=0; ${_REQUESTS}/${DURATION};" |bc`
   # Calculate the average for all the response times. 
   _RTTAVG=`awk 'BEGIN{num=0;tot=0}{num=num+1;tot=tot+$1}END{print tot/num}' ${TMP} |stripdecimals`
-  _ERRORS="-"
   _RTTMIN=`cat ${TMP} |sort -n |head -1 |awk '{print $1}'`
   _RTTMAX=`cat ${TMP} |sort -n |tail -1 |awk '{print $1}'`
   _RTTp50=`cat ${TMP} |percentile 50`
@@ -511,8 +547,8 @@ grinder_scripting() {
   _RTTp95=`cat ${TMP} |percentile 95`
   _RTTp99=`cat ${TMP} |percentile 99`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -529,8 +565,8 @@ gatling_scripting() {
   echo "${TESTNAME}: Executing gatling ... "
   # TODO - fix Gatlings tricky config setup...  
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -545,8 +581,11 @@ wrk_scripting() {
   CFG=${TESTDIR}/configs/wrk_${STARTTIME}.lua
   replace_all ${TESTDIR}/configs/wrk.lua ${CFG}
   echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} ... "
+  _START=`date +%s.%N`
   ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _RPS=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep '^Requests/sec:' |awk '{print $2}' |toint`
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  _RPS=`grep '^Requests/sec:' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
   _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
   _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
   _ERRORS="-"
@@ -558,8 +597,8 @@ wrk_scripting() {
   _RTTp95="-"
   _RTTp99=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
   echo ""
-  echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "${TESTNAME}: done"
   echo ""
   sleep 3
@@ -586,9 +625,9 @@ staticurltests() {
       ${LOGDIR}/jmeter_static/timings \
       >${LOGDIR}/staticurltests.timings
   echo ""
-  echo "------------------------------------------------------ Static URL test results --------------------------------------------------------"
-  report ${LOGDIR}/staticurltests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
-  echo "---------------------------------------------------------------------------------------------------------------------------------------"
+  echo "---------------------------------------------------------- Static URL test results ------------------------------------------------------------"
+  report ${LOGDIR}/staticurltests.timings "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "-----------------------------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
 
@@ -604,9 +643,9 @@ scriptingtests() {
       ${LOGDIR}/wrk_scripting/timings \
       >${LOGDIR}/scriptingtests.timings
   echo ""
-  echo "------------------------------------------------------ Scripting test results --------------------------------------------------------"
-  report ${LOGDIR}/scriptingtests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
-  echo "--------------------------------------------------------------------------------------------------------------------------------------"
+  echo "---------------------------------------------------------- Scripting test results ------------------------------------------------------------"
+  report ${LOGDIR}/scriptingtests.timings "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "----------------------------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
 
@@ -619,9 +658,9 @@ alltests() {
       ${LOGDIR}/scriptingtests.timings \
       >${LOGDIR}/alltests.timings
   echo ""
-  echo "--------------------------------------------------------- All test results -----------------------------------------------------------"
-  report ${LOGDIR}/alltests.timings "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
-  echo "--------------------------------------------------------------------------------------------------------------------------------------"
+  echo "------------------------------------------------------------- All test results ---------------------------------------------------------------"
+  report ${LOGDIR}/alltests.timings "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "----------------------------------------------------------------------------------------------------------------------------------------------"
   echo ""
 }
 

@@ -28,23 +28,28 @@ ENV PATH ${GOPATH}/bin:${GOROOT}/bin:/usr/local/bin:${PATH}
 # Create .gitconfig
 COPY Gitconfig ${HOME}/.gitconfig
 
-# Get and compile wrk (latest snapshot)
-RUN cd ${TESTDIR} && git clone 'https://github.com/wg/wrk.git'
+# Get and compile wrk 
+RUN cd ${TESTDIR} && git clone 'https://github.com/wg/wrk'
 RUN cd ${TESTDIR}/wrk && make
+# Checkout specific commit that we know runtest.sh is compatible with
+# RUN cd ${TESTDIR}/wrk && git checkout 50305ed1d89408c26067a970dcd5d9dbea19de9d && make
 
 # Get and compile boom (latest snapshot)
 RUN go get -u github.com/rakyll/boom
+# runtest.sh works with this commit: https://github.com/rakyll/boom/commit/e99ce27f0878c1d266c8a3c266029038e78c5380
 
 # Get and compile vegeta (latest snapshot)
 RUN go get -u github.com/tsenart/vegeta
+# runtest.sh works with this commit: https://github.com/tsenart/vegeta/commit/7cff4dc0ed44f0a8b9777caf050950eb67972f43
 
 # Install Apachebench (>=2.3)
 RUN apt-get -y install apache2-utils
+# How install specific version of ab?
 
 # Get and compile Siege (latest snapshot)
 RUN apt-get -y install siege
 #RUN cd ${TESTDIR} && git clone 'https://github.com/JoeDog/siege.git'
-#RUN cd ${TESTDIR}/siege && autoconf && ./configure && make
+#RUN cd ${TESTDIR}/siege && checkout xxxxxxxxxxx && autoconf && ./configure && make install
 
 # Install Tsung (1.6.0)
 RUN cd ${TESTDIR} && wget -O - 'http://tsung.erlang-projects.org/dist/tsung-1.6.0.tar.gz' |tar -xzf -
@@ -52,6 +57,8 @@ RUN cd ${TESTDIR}/tsung-1.6.0 && ./configure && make install
 
 # Install Locust (>=0.7.5)
 RUN pip install locustio
+# RUN cd ${TESTDIR} && git clone 'https://github.com/locustio/locust'
+# RUN cd ${TESTDIR}/locust && checkout 16140b0680cd7ab5d580aa2a1578a6349f988876 && python setup.py
 
 # Gatling 2.2.2
 RUN cd ${TESTDIR} && wget 'https://repo1.maven.org/maven2/io/gatling/highcharts/gatling-charts-highcharts-bundle/2.2.2/gatling-charts-highcharts-bundle-2.2.2-bundle.zip' && \
@@ -66,6 +73,7 @@ RUN cd ${TESTDIR} && wget 'http://downloads.sourceforge.net/project/grinder/The%
 
 # Artillery (>=1.5.0-12)
 RUN npm install -g artillery
+# git clone 'https://github.com/shoreditch-ops/artillery' && git checkout ... && ...
 
 COPY runtests.sh ${TESTDIR}
 RUN chmod 755 ${TESTDIR}/runtests.sh
