@@ -97,16 +97,21 @@ duration2ms() {
   fi
 }
 
+#
+# Extract a percentile based on an input stream with samples
+# awk -F\, 'NR>1{print $13}' $1 |percentile 50
+#
 percentile() {
   PCT=$1
   TMPFILE=/tmp/percentile.$$.sorted
   sort -n >$TMPFILE
-  LINES=`wc -l ${TMPFILE}`
-  TARGETLINE=`echo "scale=0; (${PCT}*${LINES})/100`
-  awk 'NR=='${TARGETLINE}'{print $1}'
+  LINES=`wc -l ${TMPFILE} |awk '{print $1}'`
+  TARGETLINE=`echo "scale=0; (${PCT}*${LINES})/100" |bc`
+  awk 'NR=='${TARGETLINE}'{print $1}' ${TMPFILE}
+  rm -f ${TMPFILE}
 }
 
-# 1 param: filename containing test data from one or more tests, in this format:
+# param 1: filename containing test data from one or more tests, in this format:
 # TESTNAME, REQUESTS, ERRORS, RPS, RTTMIN, RTTMAX, RTTAVG(mean), RTTp50(median), RTTp75, RTTp90, RTTp95, RTTp99
 # Use "-" if there is no result for that param
 # optional 2nd param is a header to also be sent to column
@@ -132,8 +137,7 @@ report() {
 
 # Take a decimal or integer number and strip it to at most 2-digit precision
 stripdecimals() {
-  read X
-  echo $X |egrep -o '^[0-9]*\.?[0-9]?[0-9]?'
+  egrep -o '^[0-9]*\.?[0-9]?[0-9]?'
 }
 
 # round down to nearest integer
@@ -265,6 +269,7 @@ artillery_static() {
   echo ""
   sleep 3
 }
+
 vegeta_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
@@ -369,14 +374,11 @@ tsung_static() {
   _ERRORS="-"
   _RTTMAX=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $6}' |stripdecimals`
   _RTTMIN=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $7}' |stripdecimals`
-  # Tsung can be run with a backend="fullstats" mode, that will make it log timings per individual
-  # transaction, but the docs warn about the performance hit this means. We are not using that 
-  # mode for this benchmarking, which means statistics are a bit limited.
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _RTTp50=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 50 |stripdecimals`
+  _RTTp75=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 75 |stripdecimals`
+  _RTTp90=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 90 |stripdecimals`
+  _RTTp95=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 95 |stripdecimals`
+  _RTTp99=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 99 |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -384,6 +386,7 @@ tsung_static() {
   echo ""
   sleep 3
 }
+
 jmeter_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
@@ -396,7 +399,9 @@ jmeter_static() {
   replace_all ${TESTDIR}/configs/jmeter.xml ${CFG}
   JMETERLOG=${RESULTS}/jmeter.log
   TXLOG=${RESULTS}/transactions.csv
-  # useNanoTime=true doesn't seem to work
+  #
+  # useNanoTime=true doesn't seem to work. I'm probably doing something wrong.
+  #
   echo "${TESTNAME}: Executing jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true ... "
   ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _REQUESTS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $3}'`
@@ -406,11 +411,11 @@ jmeter_static() {
   _RTTMIN=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $11}' |stripdecimals`
   _RTTMAX=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $13}' |stripdecimals`
   _ERRORS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $15}' |stripdecimals`
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _RTTp50=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 50`
+  _RTTp75=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 75`
+  _RTTp90=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 90`
+  _RTTp95=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 95`
+  _RTTp99=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 99`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -446,12 +451,13 @@ locust_scripting() {
   _RTTAVG=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $5}' |stripdecimals`
   _ERRORS="-"
   _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _PATH=/`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\/// |cut -d\/ -f2-'`
+  _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $12}'`
+  _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $4}'`
+  _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $6}'`
+  _RTTp90=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $8}'`
+  _RTTp95=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $9}'`
+  _RTTp99=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $11}'`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -497,13 +503,13 @@ grinder_scripting() {
   # Calculate the average for all the response times. 
   _RTTAVG=`awk 'BEGIN{num=0;tot=0}{num=num+1;tot=tot+$1}END{print tot/num}' ${TMP} |stripdecimals`
   _ERRORS="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _RTTMIN=`cat ${TMP} |sort -n |head -1 |awk '{print $1}'`
+  _RTTMAX=`cat ${TMP} |sort -n |tail -1 |awk '{print $1}'`
+  _RTTp50=`cat ${TMP} |percentile 50`
+  _RTTp75=`cat ${TMP} |percentile 75`
+  _RTTp90=`cat ${TMP} |percentile 90`
+  _RTTp95=`cat ${TMP} |percentile 95`
+  _RTTp99=`cat ${TMP} |percentile 99`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -545,12 +551,12 @@ wrk_scripting() {
   _REQUESTS=`grep ' requests in ' ${RESULTS}/stdout.log |tail -1 |awk '{print $1}'`
   _ERRORS="-"
   _RTTMIN="-"
-  _RTTMAX=`grep -A 2 'Thread stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $4}' |duration2ms |stripdecimals`
-  _RTTp50=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="50%"{print $2}' |duration2ms |stripdecimals`
-  _RTTp75=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="75%"{print $2}' |duration2ms |stripdecimals`
-  _RTTp90=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="90%"{print $2}' |duration2ms |stripdecimals`
+  _RTTMAX=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $4}' |duration2ms |stripdecimals`
+  _RTTp50=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="50%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp75=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="75%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp90=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="90%"{print $2}' |duration2ms |stripdecimals`
   _RTTp95="-"
-  _RTTp99=`grep -A 4 'Latency distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
+  _RTTp99=`grep -A 4 'Latency Distribution' ${RESULTS}/stdout.log |awk '$1=="99%"{print $2}' |duration2ms |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
