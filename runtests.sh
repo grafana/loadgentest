@@ -583,17 +583,17 @@ gatling_scripting() {
   JAVA_OPTS=${JAVA_OPTS} ${TESTDIR}/gatling-charts-highcharts-bundle-2.2.2/bin/gatling.sh -sf ${SIMULATIONDIR} -s ${SIMULATIONCLASS} -rf ${RESULTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  _RPS="-"
-  _REQUESTS="-"
-  _ERRORS="-"
-  _RTTAVG="-"
-  _RTTMIN="-"
-  _RTTMAX="-"
-  _RTTp50="-"
-  _RTTp75="-"
+  _REQUESTS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $4}'`
+  _ERRORS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $6}' |cut -d\= -f2`
+  _RPS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean requests/sec" |awk '{print $4}' |stripdecimals`
+  _RTTAVG=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean response time" |awk '{print $5}' |stripdecimals`
+  _RTTMIN=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "min response time" |awk '{print $5}' |stripdecimals`
+  _RTTMAX=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "max response time" |awk '{print $5}' |stripdecimals`
+  _RTTp50=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 50th percentile" |awk '{print $6}' |stripdecimals`
+  _RTTp75=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 75th percentile" |awk '{print $6}' |stripdecimals`
+  _RTTp95=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 95th percentile" |awk '{print $6}' |stripdecimals`
+  _RTTp99=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 99th percentile" |awk '{print $6}' |stripdecimals`
   _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
