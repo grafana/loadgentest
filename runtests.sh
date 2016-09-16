@@ -18,6 +18,7 @@ checkfor rm
 checkfor bc
 checkfor jq
 checkfor wc
+checkfor tc
 checkfor cat
 checkfor tee
 checkfor awk
@@ -27,6 +28,7 @@ checkfor grep
 checkfor expr
 checkfor echo
 checkfor tail
+checkfor ping
 checkfor egrep
 checkfor mkdir
 checkfor column
@@ -35,14 +37,21 @@ export TARGETURL=""
 export CONCURRENT=20
 export REQUESTS=1000
 export DURATION=10
+export NETWORK_DELAY=0
 
 # Compute various useful parameters from REQUESTS, CONCURRENT, DURATION and TARGETURL
 export_testvars() {
   export REQS_PER_VU=`expr ${REQUESTS} \/ ${CONCURRENT}`
   export RATE=`expr ${REQUESTS} \/ ${DURATION}`
-  export TARGETPROTO=`echo ${TARGETURL} |egrep -o '^https?'`
-  export TARGETHOST=`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f1`
-  export TARGETPATH=/`echo ${TARGETURL} |awk -F\/ '{print $NF}'`
+  if [ "${TARGETURL}x" = "x" ] ; then
+    unset TARGETPROTO
+    unset TARGETHOST
+    unset TARGETPATH
+  else
+    export TARGETPROTO=`echo ${TARGETURL} |egrep -o '^https?'`
+    export TARGETHOST=`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f1`
+    export TARGETPATH=/`echo ${TARGETURL} |awk -F\/ '{print $NF}'`
+  fi
 }
 
 # replace fname str replace-str
@@ -59,7 +68,6 @@ replace_all() {
   SRC=$1
   DEST=$2
   cp -f $SRC $DEST
-  export_testvars
   replace $DEST "REQS_PER_VU" "${REQS_PER_VU}"
   replace $DEST "CONCURRENT" "${CONCURRENT}"
   replace $DEST "DURATION" "${DURATION}"
@@ -253,7 +261,6 @@ artillery_static() {
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
   export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
-  export_testvars
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing artillery quick --count ${CONCURRENT} -n ${REQS_PER_VU} -o ${RESULTS}/artillery_report.json ${TARGETURL} ... "
@@ -289,7 +296,6 @@ vegeta_static() {
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
   export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   # Vegeta only supports static request rates. You might want to change the REQUESTS parameter until you get the highest throughput w/o errors.
-  export_testvars
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
@@ -692,6 +698,7 @@ alltests() {
 clear
 while [ 1 ]
 do
+  export_testvars
   echo ""
   echo "################################################"
   echo "#  Load Impact load generator test suite V1.0  #"
@@ -701,6 +708,15 @@ do
   echo "2. Set concurrent requests/VUs (current: ${CONCURRENT})"
   echo "3. Set total number of requests (current: ${REQUESTS})"
   echo "4. Set test duration (current: ${DURATION})"
+  echo ""
+  if [ ! "${PINGTIME}x" = "x" ] ; then
+    echo "R. Add network delay (netem: +${NETWORK_DELAY}ms ==> ping ${TARGETHOST}: ${PINGTIME}ms)"
+  else
+    echo "R. Add network delay (netem: +${NETWORK_DELAY}ms)"
+  fi
+  if [ "${TARGETHOST}x" != "x" ] ; then
+    echo "P. Ping ${TARGETHOST}"
+  fi
   echo ""
   echo "5. Run all tests"
   echo "6. Run all static-URL tests"
@@ -722,7 +738,7 @@ do
   echo ""
   echo "X. Escape to bash"
   echo ""
-  echo -n "Select (1-4,a-h,A-D,X): "
+  echo -n "Select (1-7,a-h,A-D,R,X): "
   read ans
   # Record start time
   export STARTTIME=`date +%y%m%d-%H%M%S`
@@ -792,6 +808,27 @@ do
       ;;
     D)
       [ "${TARGETURL}x" != "x" ] && wrk_scripting
+      ;;
+    R)
+      echo -n "Enter extra network delay to add (ms) : "
+      read ans
+      if [ "${NETWORK_DELAY}x" = "0x" ] ; then
+        echo "tc qdisc add dev eth0 root netem delay ${ans}ms"
+        tc qdisc add dev eth0 root netem delay ${ans}ms
+      else
+        echo "tc qdisc change dev eth0 root netem delay ${ans}ms"
+        tc qdisc change dev eth0 root netem delay ${ans}ms
+      fi
+      if [ $? -ne 0 ] ; then 
+        echo "Failed to set network delay. Try running docker container with --cap-add=NET_ADMIN"
+      else
+        export NETWORK_DELAY=$ans
+      fi
+      ;;
+    P)
+      if [ ! "${TARGETHOST}x" = "x" ] ; then
+        PINGTIME=`ping -c2 -i.2 ${TARGETHOST} |tail -1 |awk '{print $4}' |awk -F\/ '{print $1}' |stripdecimals`
+      fi
       ;;
     X)
       /bin/bash
