@@ -7,8 +7,17 @@ ENV TESTDIR /loadgentests
 # Make dir where we will put all our loadgen tools, data and dependencies
 RUN mkdir ${TESTDIR}
 
+# Java8
+RUN apt-key adv --keyserver keyserver.ubuntu.com --recv-keys DA1A4A13543B466853BAF164EB9B1D8886F44E2A
+RUN touch /etc/apt/sources.list.d/openjdk.list
+RUN echo "deb http://ppa.launchpad.net/openjdk-r/ppa/ubuntu trusty main " >>/etc/apt/sources.list.d/openjdk.list
+RUN echo "deb-src http://ppa.launchpad.net/openjdk-r/ppa/ubuntu trusty main" >>/etc/apt/sources.list.d/openjdk.list
+RUN apt-get update
+RUN apt-get -y install openjdk-8-jdk
+ENV JAVA_HOME /usr/lib/jvm/java-8-openjdk-amd64
+
 # C compiler, make, libssl, autoconf, etc
-RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm openjdk-7-jre unzip wget git python-pip python-dev python-zmq bc bsdmainutils jq
+RUN apt-get -y install gcc libssl-dev autoconf erlang-dev erlang-nox nodejs npm unzip wget git python-pip python-dev python-zmq bc bsdmainutils jq
 
 # Update nodejs
 RUN npm cache clean -f

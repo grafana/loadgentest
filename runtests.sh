@@ -36,6 +36,15 @@ export CONCURRENT=20
 export REQUESTS=1000
 export DURATION=10
 
+# Compute various useful parameters from REQUESTS, CONCURRENT, DURATION and TARGETURL
+export_testvars() {
+  export REQS_PER_VU=`expr ${REQUESTS} \/ ${CONCURRENT}`
+  export RATE=`expr ${REQUESTS} \/ ${DURATION}`
+  export TARGETPROTO=`echo ${TARGETURL} |egrep -o '^https?'`
+  export TARGETHOST=`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f1`
+  export TARGETPATH=/`echo ${TARGETURL} |awk -F\/ '{print $NF}'`
+}
+
 # replace fname str replace-str
 replace() {
   FNAME=$1
@@ -50,10 +59,7 @@ replace_all() {
   SRC=$1
   DEST=$2
   cp -f $SRC $DEST
-  REQS_PER_VU=`expr ${REQUESTS} \/ ${CONCURRENT}`
-  TARGETHOST=`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f1`
-  TARGETPATH=/`echo ${TARGETURL} |awk -F\/ '{print $NF}'`
-  RATE=`expr ${REQUESTS} \/ ${DURATION}`
+  export_testvars
   replace $DEST "REQS_PER_VU" "${REQS_PER_VU}"
   replace $DEST "CONCURRENT" "${CONCURRENT}"
   replace $DEST "DURATION" "${DURATION}"
@@ -247,7 +253,7 @@ artillery_static() {
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
   export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
-  REQS_PER_VU=`expr ${REQUESTS} \/ ${CONCURRENT}`
+  export_testvars
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing artillery quick --count ${CONCURRENT} -n ${REQS_PER_VU} -o ${RESULTS}/artillery_report.json ${TARGETURL} ... "
@@ -283,12 +289,12 @@ vegeta_static() {
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
   export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   # Vegeta only supports static request rates. You might want to change the REQUESTS parameter until you get the highest throughput w/o errors.
-  _RATE=`expr ${REQUESTS} \/ ${DURATION}`
+  export_testvars
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
+  echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
   _START=`date +%s.%N`
-  echo "GET ${TARGETURL}" |vegeta attack -rate=${_RATE} -connections=${CONCURRENT} -duration=${DURATION}s |vegeta report -reporter json > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  echo "GET ${TARGETURL}" |vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s |vegeta report -reporter json > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   #
@@ -560,10 +566,28 @@ gatling_scripting() {
   RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
-  CFG=${TESTDIR}/configs/gatling_${STARTTIME}.scala  
+  SIMULATIONDIR=${TESTDIR}/configs/Gatling_${STARTTIME}
+  mkdir -p ${SIMULATIONDIR}
+  SIMULATIONCLASS=GatlingSimulation
+  CFG=${SIMULATIONDIR}/${SIMULATIONCLASS}.scala
   replace_all ${TESTDIR}/configs/gatling.scala ${CFG}
+  JAVA_OPTS="-Dvus=${CONCURRENT} -Dduration=${DURATION} -Dtargetproto=${TARGETPROTO} -Dtargethost=${TARGETHOST} -Dtargetpath=${TARGETPATH}"
   echo "${TESTNAME}: Executing gatling ... "
-  # TODO - fix Gatlings tricky config setup...  
+  _START=`date +%s.%N`
+  JAVA_OPTS=${JAVA_OPTS} ${TESTDIR}/gatling-charts-highcharts-bundle-2.2.2/bin/gatling.sh -sf ${SIMULATIONDIR} -s ${SIMULATIONCLASS} -rf ${RESULTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  _RPS="-"
+  _REQUESTS="-"
+  _ERRORS="-"
+  _RTTAVG="-"
+  _RTTMIN="-"
+  _RTTMAX="-"
+  _RTTp50="-"
+  _RTTp75="-"
+  _RTTp90="-"
+  _RTTp95="-"
+  _RTTp99="-"
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
