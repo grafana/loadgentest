@@ -90,6 +90,14 @@ duration2ms() {
   else
     NUM=`echo $X |sed 's/'${UNIT}'//'`
   fi
+  # Check that NUM is an actual number. If not, it might be e.g. "NaN" reported by Artillery
+  # and we consider that to be a "not reported" metric. It might also be some strange error
+  # of course. We should probably try harder to detect errors.
+  echo "${NUM}" |egrep '^[0-9]*\.?[0-9]*$' >/dev/null 2>&1
+  if [ $? -eq 1 ] ; then
+    echo "-"
+    return 0
+  fi
   PRECISION=`echo "scale(${NUM})" |bc -l`
   if [ "${UNIT}x" = "sx" -o "${UNIT}x" = "x" ] ; then
     # Seconds
@@ -104,8 +112,16 @@ duration2ms() {
     echo "error: unknown unit in duration: ${1}"
     return 1
   fi
+  # Should we output "-" when OUTPUT==0 ?   Maybe "-" should signify that we are not even trying to
+  # compute that metric, and "0" for any duration should be output as just "0", to indicate that the
+  # value should be viewed with suspicion, and perhaps need manual verification.
+  #if [ `echo "${OUTPUT}==0" |bc` -eq 1 ] ; then
+  #  echo "-"
+  #else
+  #  echo ${OUTPUT}
+  #fi
   if [ `echo "${OUTPUT}==0" |bc` -eq 1 ] ; then
-    echo "-"
+    echo "0"
   else
     echo ${OUTPUT}
   fi
@@ -152,7 +168,8 @@ report() {
 
 # Take a decimal or integer number and strip it to at most 2-digit precision
 stripdecimals() {
-  egrep -o '^[0-9]*\.?[0-9]?[0-9]?'
+  X=`egrep -o '^[0-9]*\.?[0-9]?[0-9]?'`
+  echo "if (${X}>0 && ${X}<1) print 0; ${X}" |bc
 }
 
 # round down to nearest integer
@@ -237,7 +254,7 @@ boom_static() {
   echo "${TESTNAME}: Executing boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _RPS=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Requests/sec:' |awk '{print $2}' |toint`
-  _DURATION=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Total:' |awk '{print $2}'`
+  _DURATION=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Total:' |awk '{print $2}' |stripdecimals`
   _REQUESTS=`grep '\[200\]' ${RESULTS}/stdout.log |grep ' responses' |awk '{print $2}'`
   _ERRORS=`grep -A 10 '^Status code distribution:' ${RESULTS}/stdout.log |grep -v '\[200\]' |grep ' responses' |awk 'BEGIN{tot=0}{tot=tot+$2}END{print tot}'`
   _RTTMIN=`egrep 'Fastest:.* secs$' ${RESULTS}/stdout.log |awk '{print $2*1000}' |stripdecimals`
@@ -275,13 +292,13 @@ artillery_static() {
   _RTTAVGNS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l`
   _RTTAVG=`echo "${_RTTAVGNS}ns" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
-  _RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2}'`
-  _RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2}'`
-  _RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2}'`
+  _RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2"ms"}' |duration2ms`
   _RTTp75="-"
   _RTTp90="-"
-  _RTTp95=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p95: ' |awk '{print $2}'`
-  _RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2}'`
+  _RTTp95=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p95: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2"ms"}' |duration2ms`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -399,7 +416,7 @@ tsung_static() {
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _LOGDIR=`grep '^Log directory is:' ${RESULTS}/stdout.log |awk '{print $4}'`
   _RTTAVG=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $8}' |stripdecimals`
-  if [ "${_RTTAVG}x" = "0x" ]; then
+  if [ `echo "${_RTTAVG}==0" |bc` -eq 1 ] ; then
     _RTTAVG=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $4}' |stripdecimals`
     _REQUESTS=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $3}'`
   else
@@ -475,31 +492,28 @@ locust_scripting() {
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   CFG=${TESTDIR}/configs/locust_${STARTTIME}.py
-  # TODO: we only support plain HTTP here also
   replace_all ${TESTDIR}/configs/locust.py ${CFG}
-  _TARGETHOST=`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f1`
   _START=`date +%s.%N`
-  echo "${TESTNAME}: Executing locust --host=\"http://${_TARGETHOST}\" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
-  locust --host="http://${_TARGETHOST}" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  echo "${TESTNAME}: Executing locust --host=\"${TARGETPROTO}://${TARGETHOST}\" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
+  locust --host="${TARGETPROTO}://${TARGETHOST}" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $2}'`
   _ERRORS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $3}' |cut -d\( -f1`
   # Locust RPS reporting is not reliable for short test durations (it can report 0 RPS)
   _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $4}' |toint`
-  if [ "${_RPS}x" = "0.00x" ]; then
+  if [ `echo "${_RPS}==0" |bc` -eq 1 ] ; then
     # Calculate some average RPS instead
-    _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |stripdecimals`
+    _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`
   fi
   _RTTAVG=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $5}' |stripdecimals`
   _RTTMIN="-"
-  _PATH=/`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f2-`
-  _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $12}'`
-  _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $4}'`
-  _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $6}'`
-  _RTTp90=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $8}'`
-  _RTTp95=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $9}'`
-  _RTTp99=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${_PATH}" |tail -1 |awk '{print $11}'`
+  _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $12}'`
+  _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $4}'`
+  _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $6}'`
+  _RTTp90=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $8}'`
+  _RTTp95=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $9}'`
+  _RTTp99=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $11}'`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -527,10 +541,9 @@ grinder_scripting() {
   replace_all $TMPCFG2 $CFG2
   rm $TMPCFG2
   cd ${TESTDIR}/configs
-  export CLASSPATH=/loadgentests/grinder-3.11/lib/grinder.jar
   echo "${TESTNAME}: Executing java net.grinder.Grinder ${CFG2} ... "
   _START=`date +%s.%N`
-  java net.grinder.Grinder ${CFG2} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  CLASSPATH=/loadgentests/grinder-3.11/lib/grinder.jar java net.grinder.Grinder ${CFG2} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Grinder only logs durations for individual requests. I don't think there is any simple way of making it
@@ -565,6 +578,7 @@ grinder_scripting() {
   echo ""
   sleep 3
 }
+
 gatling_scripting() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
@@ -601,6 +615,7 @@ gatling_scripting() {
   echo ""
   sleep 3
 }
+
 wrk_scripting() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
@@ -820,7 +835,7 @@ do
         tc qdisc change dev eth0 root netem delay ${ans}ms
       fi
       if [ $? -ne 0 ] ; then 
-        echo "Failed to set network delay. Try running docker container with --cap-add=NET_ADMIN"
+        echo "Failed to set network delay. Try running docker image with --cap-add=NET_ADMIN"
       else
         export NETWORK_DELAY=$ans
       fi
