@@ -91,6 +91,7 @@ RUN mkdir ${TESTDIR}/configs
 
 COPY configs/tsung.xml ${TESTDIR}/configs
 COPY configs/jmeter.xml ${TESTDIR}/configs
+COPY configs/artillery.json ${TESTDIR}/configs
 COPY configs/gatling.scala ${TESTDIR}/configs
 COPY configs/grinder.py ${TESTDIR}/configs
 COPY configs/grinder.properties ${TESTDIR}/configs

@@ -47,10 +47,12 @@ export_testvars() {
     unset TARGETPROTO
     unset TARGETHOST
     unset TARGETPATH
+    unset TARGETBASEURL
   else
     export TARGETPROTO=`echo ${TARGETURL} |egrep -o '^https?'`
     export TARGETHOST=`echo ${TARGETURL} |sed 's/https:\/\///' |sed 's/http:\/\///' |cut -d\/ -f1`
     export TARGETPATH=/`echo ${TARGETURL} |awk -F\/ '{print $NF}'`
+    export TARGETBASEURL="${TARGETPROTO}://${TARGETHOST}"
   fi
 }
 
@@ -75,6 +77,7 @@ replace_all() {
   replace $DEST "TARGETHOST" "${TARGETHOST}"
   replace $DEST "TARGETPATH" "${TARGETPATH}"
   replace $DEST "TARGETURL" "${TARGETURL}"
+  replace $DEST "TARGETBASEURL" "${TARGETBASEURL}"
   replace $DEST "LOGDIR" "${RESULTS}"
 }
 
@@ -279,10 +282,12 @@ artillery_static() {
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
   export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
+  CFG=${TESTDIR}/configs/artillery_${STARTTIME}.json
+  replace_all ${TESTDIR}/configs/artillery.json ${CFG}
   TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing artillery quick --count ${CONCURRENT} -n ${REQS_PER_VU} -o ${RESULTS}/artillery_report.json ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing artillery run -o ${RESULTS}/artillery_report.json ${CFG}"
   _START=`date +%s.%N`
-  artillery quick --count ${CONCURRENT} -n ${REQS_PER_VU} -o ${RESULTS}/artillery_report.json ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  artillery run -o ${RESULTS}/artillery_report.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`

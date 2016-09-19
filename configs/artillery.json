@@ -1,0 +1,20 @@
+{
+  "config": {
+    "target": "TARGETBASEURL",
+    "phases": [
+      {"duration": 1, "arrivalRate": CONCURRENT, "name": "startphase"}
+    ]
+  },
+  "scenarios": [
+    {
+      "flow": [
+        {
+          "loop": [
+            {"get": {"url": "TARGETPATH"}}
+          ],
+          "count": REQS_PER_VU
+        }
+      ]
+    }
+  ]
+}
