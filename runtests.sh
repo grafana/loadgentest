@@ -292,8 +292,8 @@ artillery_static() {
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
   _RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |toint`
-  _OKNUM=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |wc -l`
-  _OKRTTTOT=`jq '.intermediate[0].latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk '{print $2}' |paste -sd+ |bc -l`
+  _OKNUM=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |wc -l`
+  _OKRTTTOT=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk '{print $2}' |paste -sd+ |bc -l`
   _RTTAVGNS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l`
   _RTTAVG=`echo "${_RTTAVGNS}ns" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
@@ -488,6 +488,44 @@ jmeter_static() {
   sleep 3
 }
 
+gatling_static() {
+  TESTNAME=${FUNCNAME[0]}
+  echo ""
+  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  mkdir -p ${RESULTS}
+  TIMINGS="${RESULTS}/timings"
+  SIMULATIONDIR=${TESTDIR}/configs/Gatling_${STARTTIME}
+  mkdir -p ${SIMULATIONDIR}
+  SIMULATIONCLASS=GatlingSimulation
+  CFG=${SIMULATIONDIR}/${SIMULATIONCLASS}.scala
+  replace_all ${TESTDIR}/configs/gatling.scala ${CFG}
+  JAVA_OPTS="-Dvus=${CONCURRENT} -Dduration=${DURATION} -Dtargetproto=${TARGETPROTO} -Dtargethost=${TARGETHOST} -Dtargetpath=${TARGETPATH}"
+  echo "${TESTNAME}: Executing gatling ... "
+  _START=`date +%s.%N`
+  JAVA_OPTS=${JAVA_OPTS} ${TESTDIR}/gatling-charts-highcharts-bundle-2.2.2/bin/gatling.sh -sf ${SIMULATIONDIR} -s ${SIMULATIONCLASS} -rf ${RESULTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  _REQUESTS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $4}'`
+  _ERRORS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $6}' |cut -d\= -f2`
+  _RPS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean requests/sec" |awk '{print $4}' |stripdecimals`
+  _RTTAVG=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean response time" |awk '{print $5}' |stripdecimals`
+  _RTTMIN=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "min response time" |awk '{print $5}' |stripdecimals`
+  _RTTMAX=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "max response time" |awk '{print $5}' |stripdecimals`
+  _RTTp50=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 50th percentile" |awk '{print $6}' |stripdecimals`
+  _RTTp75=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 75th percentile" |awk '{print $6}' |stripdecimals`
+  _RTTp95=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 95th percentile" |awk '{print $6}' |stripdecimals`
+  _RTTp99=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 99th percentile" |awk '{print $6}' |stripdecimals`
+  _RTTp90="-"
+  echo ""
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME}: done"
+  echo ""
+  sleep 3
+}
+
+
 # Scripting tests
 locust_scripting() {
   TESTNAME=${FUNCNAME[0]}
@@ -584,43 +622,6 @@ grinder_scripting() {
   sleep 3
 }
 
-gatling_scripting() {
-  TESTNAME=${FUNCNAME[0]}
-  echo ""
-  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
-  mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  SIMULATIONDIR=${TESTDIR}/configs/Gatling_${STARTTIME}
-  mkdir -p ${SIMULATIONDIR}
-  SIMULATIONCLASS=GatlingSimulation
-  CFG=${SIMULATIONDIR}/${SIMULATIONCLASS}.scala
-  replace_all ${TESTDIR}/configs/gatling.scala ${CFG}
-  JAVA_OPTS="-Dvus=${CONCURRENT} -Dduration=${DURATION} -Dtargetproto=${TARGETPROTO} -Dtargethost=${TARGETHOST} -Dtargetpath=${TARGETPATH}"
-  echo "${TESTNAME}: Executing gatling ... "
-  _START=`date +%s.%N`
-  JAVA_OPTS=${JAVA_OPTS} ${TESTDIR}/gatling-charts-highcharts-bundle-2.2.2/bin/gatling.sh -sf ${SIMULATIONDIR} -s ${SIMULATIONCLASS} -rf ${RESULTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
-  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  _REQUESTS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $4}'`
-  _ERRORS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $6}' |cut -d\= -f2`
-  _RPS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean requests/sec" |awk '{print $4}' |stripdecimals`
-  _RTTAVG=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean response time" |awk '{print $5}' |stripdecimals`
-  _RTTMIN=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "min response time" |awk '{print $5}' |stripdecimals`
-  _RTTMAX=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "max response time" |awk '{print $5}' |stripdecimals`
-  _RTTp50=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 50th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp75=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 75th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp95=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 95th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp99=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 99th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp90="-"
-  echo ""
-  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
-  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
-  echo "${TESTNAME}: done"
-  echo ""
-  sleep 3
-}
-
 wrk_scripting() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
@@ -663,6 +664,7 @@ staticurltests() {
   siege_static
   tsung_static
   jmeter_static
+  gatling_static
   # Concat all timing files
   LOGDIR=${TESTDIR}/results/${STARTTIME}
   cat ${LOGDIR}/apachebench_static/timings \
@@ -673,6 +675,7 @@ staticurltests() {
       ${LOGDIR}/siege_static/timings \
       ${LOGDIR}/tsung_static/timings \
       ${LOGDIR}/jmeter_static/timings \
+      ${LOGDIR}/gatling_static/timings \
       >${LOGDIR}/staticurltests.timings
   echo ""
   echo "---------------------------------------------------------- Static URL test results ------------------------------------------------------------"
@@ -684,7 +687,6 @@ staticurltests() {
 scriptingtests() {
   locust_scripting
   grinder_scripting
-  #gatling_scripting
   wrk_scripting
   # Concat all timing files
   LOGDIR=${TESTDIR}/results/${STARTTIME}
@@ -693,7 +695,7 @@ scriptingtests() {
       ${LOGDIR}/wrk_scripting/timings \
       >${LOGDIR}/scriptingtests.timings
   echo ""
-  echo "---------------------------------------------------------- Scripting test results ------------------------------------------------------------"
+  echo "------------------------------------------------------ Dynamic scripting test results --------------------------------------------------------"
   report ${LOGDIR}/scriptingtests.timings "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
   echo "----------------------------------------------------------------------------------------------------------------------------------------------"
   echo ""
@@ -729,13 +731,13 @@ do
   echo "3. Set total number of requests (current: ${REQUESTS})"
   echo "4. Set test duration (current: ${DURATION})"
   echo ""
-  if [ ! "${PINGTIME}x" = "x" ] ; then
-    echo "R. Add network delay (netem: +${NETWORK_DELAY}ms ==> ping ${TARGETHOST}: ${PINGTIME}ms)"
-  else
-    echo "R. Add network delay (netem: +${NETWORK_DELAY}ms)"
-  fi
+  echo "R. Add network delay (netem: +${NETWORK_DELAY}ms)"
   if [ "${TARGETHOST}x" != "x" ] ; then
-    echo "P. Ping ${TARGETHOST}"
+    if [ ! "${PINGTIME}x" = "x" ] ; then
+      echo "P. Ping ${TARGETHOST} (last RTT seen: ${PINGTIME}ms)"
+    else
+      echo "P. Ping ${TARGETHOST}"
+    fi
   fi
   echo ""
   echo "5. Run all tests"
@@ -750,11 +752,11 @@ do
   echo "f. Run Siege static-URL test"
   echo "g. Run Tsung static-URL test"
   echo "h. Run Jmeter static-URL test"
+  echo "i. Run Gatling scripting test"
   echo ""
-  echo "A. Run Locust scripting test"
-  echo "B. Run Grinder scripting test"
-  echo "C. Run Gatling scripting test"
-  echo "D. Run Wrk scripting test"
+  echo "A. Run Locust dynamic scripting test"
+  echo "B. Run Grinder dynamic scripting test"
+  echo "C. Run Wrk dynamic scripting test"
   echo ""
   echo "X. Escape to bash"
   echo ""
@@ -817,14 +819,14 @@ do
     h)
       [ "${TARGETURL}x" != "x" ] && jmeter_static
       ;;
+    i)
+      [ "${TARGETURL}x" != "x" ] && gatling_scripting
+      ;;
     A)
       [ "${TARGETURL}x" != "x" ] && locust_scripting
       ;;
     B)
       [ "${TARGETURL}x" != "x" ] && grinder_scripting
-      ;;
-    C)
-      [ "${TARGETURL}x" != "x" ] && gatling_scripting
       ;;
     D)
       [ "${TARGETURL}x" != "x" ] && wrk_scripting
