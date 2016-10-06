@@ -508,7 +508,7 @@ gatling_static() {
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $4}'`
   _ERRORS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $6}' |cut -d\= -f2`
-  _RPS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean requests/sec" |awk '{print $4}' |stripdecimals`
+  _RPS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean requests/sec" |awk '{print $4}' |toint`
   _RTTAVG=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean response time" |awk '{print $5}' |stripdecimals`
   _RTTMIN=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "min response time" |awk '{print $5}' |stripdecimals`
   _RTTMAX=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "max response time" |awk '{print $5}' |stripdecimals`
@@ -752,7 +752,7 @@ do
   echo "f. Run Siege static-URL test"
   echo "g. Run Tsung static-URL test"
   echo "h. Run Jmeter static-URL test"
-  echo "i. Run Gatling scripting test"
+  echo "i. Run Gatling static-URL test"
   echo ""
   echo "A. Run Locust dynamic scripting test"
   echo "B. Run Grinder dynamic scripting test"
@@ -820,7 +820,7 @@ do
       [ "${TARGETURL}x" != "x" ] && jmeter_static
       ;;
     i)
-      [ "${TARGETURL}x" != "x" ] && gatling_scripting
+      [ "${TARGETURL}x" != "x" ] && gatling_static
       ;;
     A)
       [ "${TARGETURL}x" != "x" ] && locust_scripting
