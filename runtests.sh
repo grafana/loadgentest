@@ -190,9 +190,9 @@ apachebench_static() {
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   PERCENTAGES=${RESULTS}/percentages
-  echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   _START=`date +%s.%N`
-  ab -k -e ${PERCENTAGES} -t ${CONCURRENT} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Complete\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
@@ -329,10 +329,10 @@ vegeta_static() {
   # Vegeta does not report redirect responses, like many other tools. But this means that considering any
   # reported response codes !=200 to be errors is not completely stupid.
   #
-  # XXX TODO: Find out how Vegeta is able to generate 4000 RPS over a 10ms RTT network connection
-  # when using 20 concurrent connections. It should be impossible. Theoretical max is 20x(1/0.01) => 2000 RPS
-  # Either the concurrent connections limit is not working, or Vegeta is using HTTP/2 and sending many
-  # requests at once.
+  # Vegeta managed to do 4000 RPS over a 10ms RTT network connection while being configured to 
+  # use 20 concurrent connections. Or so I thought. The -connections option is only a STARTING value
+  # that Vegeta may change at runtime as it sees fit. Aargh. This means there is no practical way
+  # to control concurrrency in Vegeta.
   #
   _REQUESTS=`jq '.requests' ${RESULTS}/stdout.log`
   _RPS=`jq '.rate' ${RESULTS}/stdout.log |toint`
