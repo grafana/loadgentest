@@ -290,20 +290,45 @@ artillery_static() {
   artillery run -o ${RESULTS}/artillery_report.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  _REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
-  _RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |toint`
-  _OKNUM=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |wc -l`
-  _OKRTTTOT=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk '{print $2}' |paste -sd+ |bc -l`
-  _RTTAVGNS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l`
-  _RTTAVG=`echo "${_RTTAVGNS}ns" |duration2ms`
+  _TMPDATA=${RESULTS}/transaction_log
+  jq -c '.aggregate.latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
+  #_REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
+  #_REQUESTS=`jq '.aggregate.latencies[] |{rtt:.[2]}' |grep rtt |wc -l |awk '{print $1}'`
+  _REQUESTS=`wc -l ${_TMPDATA} |awk '{print $1}'`
+  _START_TS=`head -1 ${_TMPDATA} |cut -c7-19`
+  _END_TS=`tail -1 ${_TMPDATA} |cut -c7-19`
+  _DURATION_MS=`echo "${_END_TS}-${_START_TS}" |bc`
+  _DURATION=`echo ${_DURATION_MS} |toint`
+  _RPS=`echo "scale=0; ${_REQUESTS}/${_DURATION}" |bc`
+  #_RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |toint`
+  _OKNUM=`grep '"code":200' ${_TMPDATA} |wc -l |awk '{print $1}'`
+  #_OKNUM=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |wc -l`
+  _OKRTTTOT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |paste -sd+ |bc -l`
+  #_OKRTTTOT=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk '{print $2}' |paste -sd+ |bc -l`
+  _RTTAVGUS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l |toint`
+  _RTTAVG=`echo "${_RTTAVGUS}us" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
-  _RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2"ms"}' |duration2ms`
-  _RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2"ms"}' |duration2ms`
-  _RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2"ms"}' |duration2ms`
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p95: ' |awk '{print $2"ms"}' |duration2ms`
-  _RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTMINUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |sort -n |head -1`
+  _RTTMIN=`echo "${_RTTMINUS}us" |duration2ms`
+  #_RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTMAXUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |sort -n |tail -1`
+  _RTTMAX=`echo "${_RTTMAXUS}us" |duration2ms`
+  #_RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTp50US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 50`
+  _RTTp50=`echo "${_RTTp50US}us" |duration2ms`
+  #_RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTp75US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 75`
+  _RTTp75=`echo "${_RTTp75US}us" |duration2ms`
+  #_RTTp75="-"
+  _RTTp90US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 90`
+  _RTTp90=`echo "${_RTTp90US}us" |duration2ms`
+  #_RTTp90="-"
+  _RTTp95US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 95`
+  _RTTp95=`echo "${_RTTp95US}us" |duration2ms`
+  #_RTTp95=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p95: ' |awk '{print $2"ms"}' |duration2ms`
+  _RTTp99US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 99`
+  _RTTp99=`echo "${_RTTp99US}us" |duration2ms`
+  #_RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2"ms"}' |duration2ms`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -828,7 +853,7 @@ do
     B)
       [ "${TARGETURL}x" != "x" ] && grinder_scripting
       ;;
-    D)
+    C)
       [ "${TARGETURL}x" != "x" ] && wrk_scripting
       ;;
     R)
