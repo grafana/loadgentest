@@ -1,5 +1,32 @@
 #!/bin/bash
 
+#
+# This script runs all the various load testing tools, and attempts to extract
+# useful statistics from whatever output is generated.
+#
+# TODO: Many, many things, but here are a couple of wanted fixes
+#
+# - Refactor this script and make it more consistent. E.g. how to count # of
+#   lines in a file is sometimes using `wc` + `awk` and sometimes just `awk`
+#   (we should probably skip using `wc` at all, because its output sucks).
+#   Another example: when invoking bc we sometimes use -l (mathlib) and 
+#   sometimes not, pretty randomly.
+#
+# - Refactor this script and use more modern bash syntax, e.g. $(cmd) instead of `cmd`
+#
+# - Decide whether only 200-responses should be used to calculate RPS numbers
+#   and implement the same method for all tests (currently, some do it, some don't)
+#
+# - Big one: Collect latency statistics by sniffing network traffic, rather than accept
+#   tool output. Would both give us a more objective view of things, and also
+#   make it possible to collect all stats for all tools.
+#
+# - Fix: network delay cannot be enabled again after setting it to 0 (zero)
+#
+# - Make Github issues of these comments instead!
+#
+#
+
 # Try to guess TESTDIR if it is not set
 [ -z $TESTDIR ] && export TESTDIR=/loadgentests
 
@@ -33,6 +60,7 @@ checkfor egrep
 checkfor mkdir
 checkfor column
 
+# Default settings
 export TARGETURL=""
 export CONCURRENT=20
 export REQUESTS=1000
@@ -56,6 +84,7 @@ export_testvars() {
   fi
 }
 
+# replace occurrences of a string in a file
 # replace fname str replace-str
 replace() {
   FNAME=$1
@@ -65,6 +94,7 @@ replace() {
   mv -f /tmp/_replace.tmp ${FNAME}
 }
 
+# perform a number of string replacements inside a config file
 # replace_all $source_cfg $target_cfg
 replace_all() {
   SRC=$1
@@ -144,7 +174,7 @@ percentile() {
   rm -f ${TMPFILE}
 }
 
-# param 1: filename containing test data from one or more tests, in this format:
+# param 1: filename containing test data from one or more tests, in this format (one test result per line):
 # TESTNAME RUNTIME REQUESTS ERRORS RPS RTTMIN RTTMAX RTTAVG(mean) RTTp50(median) RTTp75 RTTp90 RTTp95 RTTp99
 # Use "-" if there is no result for that param
 # optional 2nd param is a header to also be sent to column
@@ -181,6 +211,11 @@ toint() {
   echo "scale=0; ${X}/1" |bc
 }
 
+
+#
+# And here comes the actual tests!
+#
+
 # Static-URL tests
 apachebench_static() {
   TESTNAME=${FUNCNAME[0]}
@@ -199,7 +234,7 @@ apachebench_static() {
   _RPS=`grep '^Requests\ per\ second:' ${RESULTS}/stdout.log |awk '{print $4}' |toint`
   _RTTAVG=`grep '^Time\ per\ request:' ${RESULTS}/stdout.log |grep '(mean)' |awk '{print $4}' |stripdecimals`
   _ERRORS=`grep '^Failed\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
-  _RTTMIN="-"
+  _RTTMIN=`awk -F\, 'NR==2{print $2}' ${PERCENTAGES} |stripdecimals`
   _RTTMAX="-"
   _RTTp50=`grep '^50,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
   _RTTp75=`grep '^75,' ${PERCENTAGES} |cut -d\, -f2 |awk '{print $1}' |stripdecimals`
@@ -292,43 +327,30 @@ artillery_static() {
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _TMPDATA=${RESULTS}/transaction_log
   jq -c '.aggregate.latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
-  #_REQUESTS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'Requests completed:' |awk '{print $3}'`
-  #_REQUESTS=`jq '.aggregate.latencies[] |{rtt:.[2]}' |grep rtt |wc -l |awk '{print $1}'`
   _REQUESTS=`wc -l ${_TMPDATA} |awk '{print $1}'`
   _START_TS=`head -1 ${_TMPDATA} |cut -c7-19`
   _END_TS=`tail -1 ${_TMPDATA} |cut -c7-19`
   _DURATION_MS=`echo "${_END_TS}-${_START_TS}" |bc`
-  _DURATION=`echo ${_DURATION_MS} |toint`
-  _RPS=`echo "scale=0; ${_REQUESTS}/${_DURATION}" |bc`
-  #_RPS=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep 'RPS sent:' |awk '{print $3}' |toint`
+  _RPS=`echo "scale=0; (${_REQUESTS}*1000)/${_DURATION_MS}" |bc`
   _OKNUM=`grep '"code":200' ${_TMPDATA} |wc -l |awk '{print $1}'`
-  #_OKNUM=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |wc -l`
   _OKRTTTOT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |paste -sd+ |bc -l`
-  #_OKRTTTOT=`jq '.aggregate.latencies[] |select(.[3] == 200) |{rtt:.[2]}' ${RESULTS}/artillery_report.json |grep rtt |awk '{print $2}' |paste -sd+ |bc -l`
   _RTTAVGUS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l |toint`
   _RTTAVG=`echo "${_RTTAVGUS}us" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
   _RTTMINUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |sort -n |head -1`
   _RTTMIN=`echo "${_RTTMINUS}us" |duration2ms`
-  #_RTTMIN=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'min: ' |awk '{print $2"ms"}' |duration2ms`
   _RTTMAXUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |sort -n |tail -1`
   _RTTMAX=`echo "${_RTTMAXUS}us" |duration2ms`
-  #_RTTMAX=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'max: ' |awk '{print $2"ms"}' |duration2ms`
   _RTTp50US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 50`
   _RTTp50=`echo "${_RTTp50US}us" |duration2ms`
-  #_RTTp50=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'median: ' |awk '{print $2"ms"}' |duration2ms`
   _RTTp75US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 75`
   _RTTp75=`echo "${_RTTp75US}us" |duration2ms`
-  #_RTTp75="-"
   _RTTp90US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 90`
   _RTTp90=`echo "${_RTTp90US}us" |duration2ms`
-  #_RTTp90="-"
   _RTTp95US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 95`
   _RTTp95=`echo "${_RTTp95US}us" |duration2ms`
-  #_RTTp95=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p95: ' |awk '{print $2"ms"}' |duration2ms`
   _RTTp99US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 99`
   _RTTp99=`echo "${_RTTp99US}us" |duration2ms`
-  #_RTTp99=`grep -A 20 '^Complete report @' ${RESULTS}/stdout.log |grep -A 5 'Request latency:' |grep 'p99: ' |awk '{print $2"ms"}' |duration2ms`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -347,7 +369,7 @@ vegeta_static() {
   TIMINGS="${RESULTS}/timings"
   echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
   _START=`date +%s.%N`
-  echo "GET ${TARGETURL}" |vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s |vegeta report -reporter json > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  echo "GET ${TARGETURL}" |vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s >${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   #
@@ -359,23 +381,28 @@ vegeta_static() {
   # that Vegeta may change at runtime as it sees fit. Aargh. This means there is no practical way
   # to control concurrrency in Vegeta.
   #
-  _REQUESTS=`jq '.requests' ${RESULTS}/stdout.log`
-  _RPS=`jq '.rate' ${RESULTS}/stdout.log |toint`
-  _RTTAVGNS=`jq '.latencies["mean"]' ${RESULTS}/stdout.log`
-  _RTTAVG=`echo "${_RTTAVGNS}ns" |duration2ms`
-  _RTTp50NS=`jq '.latencies["50th"]' ${RESULTS}/stdout.log`
-  _RTTp50=`echo "${_RTTp50NS}ns" |duration2ms`
-  _RTTp95NS=`jq '.latencies["95th"]' ${RESULTS}/stdout.log`
-  _RTTp95=`echo "${_RTTp95NS}ns" |duration2ms`
-  _RTTp99NS=`jq '.latencies["99th"]' ${RESULTS}/stdout.log`
-  _RTTp99=`echo "${_RTTp99NS}ns" |duration2ms`
-  _RTTMAXNS=`jq '.latencies["max"]' ${RESULTS}/stdout.log`
-  _RTTMAX=`echo "${_RTTMAXNS}ns" |duration2ms`
-  _OKREQUESTS=`jq '.status_codes["200"]' ${RESULTS}/stdout.log`
+  #json dumper: {"code":200,"timestamp":"2016-10-17T09:30:53.991690378Z","latency":490871,"bytes_out":0,"bytes_in":103,"error":""}
+  #csv dumper: 1476696644001690668,200,2124978,0,103,""
+  # (note that Vegeta inserts no CSV header in the CSV dump; the first line is the first data point)
+  #
+  _CSV=${RESULTS}/vegeta_dump.csv
+  vegeta dump -dumper csv <${RESULTS}/stdout.log >${_CSV}
+  _REQUESTS=`awk 'END{print NR}' ${_CSV}`
+  _STARTNS=`head -1 ${_CSV} |awk -F\, '{print $1}'`
+  _ENDNS=`tail -1 ${_CSV} |awk -F\, '{print $1}'`
+  _DURATIONMS=`echo "(${_ENDNS}-${_STARTNS})/1000000" |bc`
+  _RPS=`echo "(${_REQUESTS}*1000)/${_DURATIONMS}" |bc`
+  _RTTTOTMS=`awk -F\, '{print $3/1000000}' ${_CSV} |paste -sd+ |bc -l`
+  _RTTAVG=`echo "${_RTTTOTMS}/${_REQUESTS}" ${_CSV} |bc -l`
+  _RTTMIN=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |head -1 |stripdecimals`
+  _RTTMAX=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |tail -1 |stripdecimals`
+  _RTTp50=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 50 |stripdecimals`
+  _RTTp75=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 75 |stripdecimals`
+  _RTTp90=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 90 |stripdecimals`
+  _RTTp95=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 95 |stripdecimals`
+  _RTTp99=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 99 |stripdecimals`
+  _OKREQUESTS=`awk -F\, '$2==200{print $0}' ${_CSV} |awk 'END{print NR}'`
   _ERRORS=`expr ${_REQUESTS} - ${_OKREQUESTS}`
-  _RTTMIN="-"
-  _RTTp75="-"
-  _RTTp90="-"
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -391,28 +418,23 @@ siege_static() {
   export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing siege -b -t ${DURATION}S -q -c ${CONCURRENT} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing siege -b -t ${DURATION}S -q -c ${CONCURRENT} -l ${RESULTS}/siege.log ${TARGETURL} ... "
   _START=`date +%s.%N`
-  siege -b -t ${DURATION}S -q -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  siege -b -t ${DURATION}S -q -c ${CONCURRENT} -l ${RESULTS}/siege.log ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  # Doesnt seem possible to tell siege where to write its logfile (but you can provide an option to *tell it not to tell you*
-  # that it will write the log to /var/log/siege.log. Very useful...)
-  mv -f /var/log/siege.log ${RESULTS}
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`
   _RPS=`grep '^Transaction rate:' ${RESULTS}/stderr.log |awk '{print $3}' |toint`
   #
   # Siege reports response time in seconds, with only 2 decimals of precision. In a benchmark it is not unlikely
-  # you will see it report 0.00s response times, or response times that never change. Given this lack of precision 
-  # it may perhaps be better to calculate average response time, like we do for Artillery?
+  # you will see it report 0.00s response times, or response times that never change. 
   _RTTAVG=`grep '^Response time:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
   #
   # Just like Vegeta, Siege does not report redirect responses. When redirects happen, they are considered part of a
-  # "successful transaction". This means that when Siege is aimed at a URL that redirects, you will see it report 
-  # e.g. "Transactions: 551 hits" and "Successful transactions: 488". This may look like some transactions failed, but
-  # if it also says "Failed transactions: 0", the missing transactions are redirects that never had time to complete.
-  # Interestingly, the siege.log file reports things differently from what siege sends to stdout. In that file,
-  # it reports that "Trans=551", "OKAY=551", "Failed=0".
+  # "successful transaction". Also interesting is how a 3xx response will increase the "successful transactions" counter
+  # but if the redirected response does then not return 2xx or 3xx, the counter will be decreased again and the error
+  # counter increased instead. This means you can see more "Successful transactions" than "Transactions" (because some
+  # were redirected and did not have time to complete the redirected request).
   #
   _ERRORS="-"
   _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
@@ -445,22 +467,19 @@ tsung_static() {
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _LOGDIR=`grep '^Log directory is:' ${RESULTS}/stdout.log |awk '{print $4}'`
-  _RTTAVG=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $8}' |stripdecimals`
-  if [ `echo "${_RTTAVG}==0" |bc` -eq 1 ] ; then
-    _RTTAVG=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $4}' |stripdecimals`
-    _REQUESTS=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $3}'`
-  else
-    _REQUESTS=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $9}'`
-  fi
-  _RPS=`echo "scale=0; ${_REQUESTS}/${_DURATION};" |bc`
-  # 
+  _STARTMS=`head -2 ${_LOGDIR}/tsung.dump | tail -1 |awk -F\; '{print $1}' |cut -c1-14 |sed 's/\.//'`
+  _ENDMS=`tail -1 ${_LOGDIR}/tsung.dump |awk -F\; '{print $1}' |cut -c1-14 |sed 's/\.//'`
+  _REQUESTS=`awk 'END{print NR-1}' ${_LOGDIR}/tsung.dump`
+  _RPS=`echo "(${_REQUESTS}*1000)/(${_ENDMS}-${_STARTMS})" |bc`
+  _RTTAVG=`awk -F\; 'BEGIN{tot=0;num=0}NR>1{tot=tot+$9; num=num+1}END{print tot/num}' ${_LOGDIR}/tsung.dump |stripdecimals`
+  #
   # Tsung actually bothers to correctly report 3xx redirect responses (as opposed to many other tools)
   # So we only count something as an "error" if the response code is less than 200 or 400+
   #
   _OKREQUESTS=`awk -F\; 'BEGIN{num=0}NR>1{if ($7>=200 && $7<400) num=num+1}END{print num}' ${_LOGDIR}/tsung.dump`
   _ERRORS=`expr ${_REQUESTS} - ${_OKREQUESTS}`
-  _RTTMAX=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $6}' |stripdecimals`
-  _RTTMIN=`grep '^stats: request ' ${_LOGDIR}/tsung.log |tail -1 |awk '{print $7}' |stripdecimals`
+  _RTTMAX=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |sort -n |tail -1 |stripdecimals`
+  _RTTMIN=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |sort -n |head -1 |stripdecimals`
   _RTTp50=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 50 |stripdecimals`
   _RTTp75=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 75 |stripdecimals`
   _RTTp90=`awk -F\; 'NR>1{print $9}' ${_LOGDIR}/tsung.dump |percentile 90 |stripdecimals`
@@ -494,12 +513,18 @@ jmeter_static() {
   ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  _REQUESTS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $3}'`
-  _RPS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $7}' |cut -d\/ -f1 |toint`
+  # TXLOG:
+  #timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,grpThreads,allThreads,Latency,IdleTime
+  #1476361406039,92,HTTP Request,200,OK,Thread Group 1-1,text,true,,311,4,4,92,0
+  #1476361406039,92,HTTP Request,200,OK,Thread Group 1-2,text,true,,311,4,4,92,0
+  _STARTMS=`head -2 ${TXLOG} |tail -1 |cut -c1-13`
+  _ENDMS=`tail -1 ${TXLOG} |cut -c1-13`
+  _REQUESTS=`awk 'END{print NR-1}' ${TXLOG}`
+  _RPS=`echo "(${_REQUESTS}*1000)/(${_ENDMS}-${_STARTMS})" |bc`
   _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$13}END{printf "%.2f", tot/num}' ${TXLOG}`
-  _RTTMIN=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $11}' |stripdecimals`
-  _RTTMAX=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $13}' |stripdecimals`
-  _ERRORS=`grep '^summary ' ${RESULTS}/stdout.log |tail -1 |awk '{print $15}' |stripdecimals`
+  _RTTMIN=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | head -1`
+  _RTTMAX=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | tail -1`
+  _ERRORS=`awk -F\, 'NR>1&&($4<200||$4>=400){print $0}' ${TXLOG} |wc -l |awk '{print $1}'`
   _RTTp50=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 50`
   _RTTp75=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 75`
   _RTTp90=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 90`
@@ -531,17 +556,26 @@ gatling_static() {
   JAVA_OPTS=${JAVA_OPTS} ${TESTDIR}/gatling-charts-highcharts-bundle-2.2.2/bin/gatling.sh -sf ${SIMULATIONDIR} -s ${SIMULATIONCLASS} -rf ${RESULTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  _REQUESTS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $4}'`
-  _ERRORS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "request count" |awk '{print $6}' |cut -d\= -f2`
-  _RPS=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean requests/sec" |awk '{print $4}' |toint`
-  _RTTAVG=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "mean response time" |awk '{print $5}' |stripdecimals`
-  _RTTMIN=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "min response time" |awk '{print $5}' |stripdecimals`
-  _RTTMAX=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "max response time" |awk '{print $5}' |stripdecimals`
-  _RTTp50=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 50th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp75=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 75th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp95=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 95th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp99=`grep -A 10 '^---- Global Information' ${RESULTS}/stdout.log |grep "response time 99th percentile" |awk '{print $6}' |stripdecimals`
-  _RTTp90="-"
+  # Please open the following file: /loadgentests/results/161013-122223/gatling_static/gatlingsimulation-1476361428999/index.html
+  _SIMULATIONLOG=`grep "Please open the following file" ${RESULTS}/stdout.log |cut -d\: -f2- |awk '{print $1}' |sed 's/\/index.html//'`/simulation.log
+  #REQUEST	Scenario Name	5		request_1	1476361429927	1476361429947	OK
+  #REQUEST	Scenario Name	6		request_1	1476361429929	1476361429956	OK
+  #REQUEST	Scenario Name	2		request_1	1476361429914	1476361429932	OK
+  #REQUEST	Scenario Name	8		request_1	1476361429935	1476361429949	OK
+  _REQUESTS=`grep '^REQUEST' ${_SIMULATIONLOG} |wc -l |awk '{print $1}'`
+  _STARTMS=`grep '^REQUEST' ${_SIMULATIONLOG} |head -1 |awk '{print $6}'`
+  _ENDMS=`grep '^REQUEST' ${_SIMULATIONLOG} |tail -1 |awk '{print $7}'`
+  _OKREQS=`awk '$1=="REQUEST"&&$8=="OK" {print $0}' ${_SIMULATIONLOG} |wc -l |awk '{print $1}'`
+  _ERRORS=`expr ${_REQUESTS} - ${_OKREQS}`
+  _RPS=`echo "(${_REQUESTS}*1000)/(${_ENDMS}-${_STARTMS})" | bc`
+  _RTTAVG=`awk 'BEGIN{tot=0; num=0}$1=="REQUEST"{tot=tot+($7-$6); num=num+1}END{print tot/num}' ${_SIMULATIONLOG}`
+  _RTTMIN=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |sort -n |head -1`
+  _RTTMAX=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |sort -n |tail -1`
+  _RTTp50=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 50`
+  _RTTp75=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 75`
+  _RTTp90=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 90`
+  _RTTp95=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 95`
+  _RTTp99=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 99`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
