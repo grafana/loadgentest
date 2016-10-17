@@ -568,14 +568,14 @@ gatling_static() {
   _OKREQS=`awk '$1=="REQUEST"&&$8=="OK" {print $0}' ${_SIMULATIONLOG} |wc -l |awk '{print $1}'`
   _ERRORS=`expr ${_REQUESTS} - ${_OKREQS}`
   _RPS=`echo "(${_REQUESTS}*1000)/(${_ENDMS}-${_STARTMS})" | bc`
-  _RTTAVG=`awk 'BEGIN{tot=0; num=0}$1=="REQUEST"{tot=tot+($7-$6); num=num+1}END{print tot/num}' ${_SIMULATIONLOG}`
-  _RTTMIN=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |sort -n |head -1`
-  _RTTMAX=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |sort -n |tail -1`
-  _RTTp50=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 50`
-  _RTTp75=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 75`
-  _RTTp90=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 90`
-  _RTTp95=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 95`
-  _RTTp99=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 99`
+  _RTTAVG=`awk 'BEGIN{tot=0; num=0}$1=="REQUEST"{tot=tot+($7-$6); num=num+1}END{print tot/num}' ${_SIMULATIONLOG} |stripdecimals`
+  _RTTMIN=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |sort -n |head -1 |stripdecimals`
+  _RTTMAX=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |sort -n |tail -1 |stripdecimals`
+  _RTTp50=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 50 |stripdecimals`
+  _RTTp75=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 75 |stripdecimals`
+  _RTTp90=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 90 |stripdecimals`
+  _RTTp95=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 95 |stripdecimals`
+  _RTTp99=`awk '$1=="REQUEST"{print $7-$6}' ${_SIMULATIONLOG} |percentile 99 |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
