@@ -8,6 +8,7 @@
   "scenarios": [
     {
       "flow": [
+        { "think": 1 },
         {
           "loop": [
             {"get": {"url": "TARGETPATH"}}

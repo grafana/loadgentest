@@ -3,7 +3,7 @@
 <tsung loglevel="notice" version="1.0" dumptraffic="protocol">
 
   <clients>
-    <client host="localhost" use_controller_vm="true"/>
+    <client host="localhost" use_controller_vm="true" maxusers="TSUNG_MAXUSERS"/>
   </clients>
   
   <servers>

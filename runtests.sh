@@ -71,6 +71,8 @@ export NETWORK_DELAY=0
 export_testvars() {
   export REQS_PER_VU=`expr ${REQUESTS} \/ ${CONCURRENT}`
   export RATE=`expr ${REQUESTS} \/ ${DURATION}`
+  # Special case for Tsung, which otherwise sometimes fails
+  export TSUNG_MU=`expr ${CONCURRENT} \* 2`
   if [ "${TARGETURL}x" = "x" ] ; then
     unset TARGETPROTO
     unset TARGETHOST
@@ -109,6 +111,7 @@ replace_all() {
   replace $DEST "TARGETURL" "${TARGETURL}"
   replace $DEST "TARGETBASEURL" "${TARGETBASEURL}"
   replace $DEST "LOGDIR" "${RESULTS}"
+  replace $DEST "TSUNG_MAXUSERS" "${TSUNG_MU}"
 }
 
 # utility func to interpret "Xs", "Xms", "Xus", "Xns" durations and translate them to ms
