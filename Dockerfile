@@ -1,4 +1,4 @@
-FROM ubuntu:14.04
+  FROM ubuntu:14.04
 
 RUN apt-get update
 
@@ -85,7 +85,9 @@ RUN npm install -g artillery
 # git clone 'https://github.com/shoreditch-ops/artillery' && git checkout ... && ...
 
 # k6, latest
-RUN go get -u github.com/loadimpact/k6
+#RUN go get -u github.com/loadimpact/k6
+# Below is workaround for https://github.com/loadimpact/k6/issues/165
+RUN cd ${TESTDIR} && wget -O - 'https://github.com/loadimpact/k6/releases/download/v0.11.0/k6-v0.11.0-linux64.tar.gz' |tar -zxf -
 
 COPY runtests.sh ${TESTDIR}
 RUN chmod 755 ${TESTDIR}/runtests.sh

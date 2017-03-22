@@ -61,11 +61,11 @@ checkfor mkdir
 checkfor column
 
 # Default settings
-#export TARGETURL="http://192.168.99.100:32771"
-export TARGETURL="http://dev-li-david.pantheonsite.io/"
-export CONCURRENT=5
+export TARGETURL="http://109.228.153.2/style.css"
+#export TARGETURL="http://dev-li-david.pantheonsite.io/"
+export CONCURRENT=20
 export REQUESTS=1000
-export DURATION=5
+export DURATION=10
 export NETWORK_DELAY=0
 
 # Compute various useful parameters from REQUESTS, CONCURRENT, DURATION and TARGETURL
@@ -400,8 +400,11 @@ vegeta_static() {
   _ENDNS=`tail -1 ${_CSV} |awk -F\, '{print $1}'`
   _DURATIONMS=`echo "(${_ENDNS}-${_STARTNS})/1000000" |bc`
   _RPS=`echo "(${_REQUESTS}*1000)/${_DURATIONMS}" |bc`
-  _RTTTOTMS=`awk -F\, '{print $3/1000000}' ${_CSV} |paste -sd+ |bc -l`
-  _RTTAVG=`echo "${_RTTTOTMS}/${_REQUESTS}" ${_CSV} |bc -l`
+  _TMPDATA_PASTE="${RESULTS}/paste_tmpdata"
+  _TMPDATA_PASTE_OUT=`awk -F\, '{print $3/1000000}' ${_CSV} >${_TMPDATA_PASTE}`
+  _RTTOTMS=`paste -sd+ ${_TMPDATA_PASTE} |bc -l`
+  rm "${_TMPDATA_PASTE}"
+  _RTTAVG=`echo "${_RTTOTMS}/${_REQUESTS}" |bc -l |stripdecimals`
   _RTTMIN=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |head -1 |stripdecimals`
   _RTTMAX=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |tail -1 |stripdecimals`
   _RTTp50=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 50 |stripdecimals`
@@ -599,9 +602,10 @@ k6_static() {
   export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing k6 run --duration ${DURATION}s --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} ... "
+  _ITERATIONS_PER_VU=`echo "${REQUESTS}/${CONCURRENT}" | bc -l | toint`
+  echo "${TESTNAME}: Executing ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} ... "
   _START=`date +%s.%N`
-  k6 run --duration ${DURATION}s --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep 'http_reqs.............:' ${RESULTS}/stdout.log |awk '{print $2}'`
@@ -651,7 +655,7 @@ locust_scripting() {
     _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`
   fi
   _RTTAVG=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $5}' |stripdecimals`
-  _RTTMIN="-"
+  _RTTMIN=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $6}'`
   _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $12}'`
   _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $4}'`
   _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $6}'`
@@ -765,9 +769,17 @@ k6_scripting() {
   TIMINGS="${RESULTS}/timings"
   CFG=${TESTDIR}/configs/k6_${STARTTIME}.js
   replace_all ${TESTDIR}/configs/k6.js ${CFG}
-  echo "${TESTNAME}: Executing k6 run --duration ${DURATION}s --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${CFG} ... "
+  _ITERATIONS_PER_VU=`echo "${REQUESTS}/${CONCURRENT}" | bc -l | toint`
+  echo "${TESTNAME}: Executing ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${CFG} ... "
   _START=`date +%s.%N`
-  k6 run --duration ${DURATION}s --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+#  mkdir -p k6_tmp && cd k6_tmp && cp ${CFG} k6tmp.js
+#  _PWD=`pwd`
+#  echo "${TESTNAME}: Executing docker run -v ${_PWD}:${_PWD} -w ${_PWD} loadimpact/k6:0.11.0 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=k6_json.json k6_${STARTTIME}.js 2>&1 | tee -a stdout.log ... "
+#  _START=`date +%s.%N`
+#  cat k6tmp.js
+#  docker run -v ${_PWD}:${_PWD} -w ${_PWD} loadimpact/k6:0.11.0 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=k6_json.json k6tmp.js 2>&1 | tee -a stdout.log
+#  cp stdout.log ${RESULTS}/stdout.log && cp k6_json.json ${RESULTS}/k6_json.json && cd .. && rm -rf k6_tmp
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep 'http_reqs.............:' ${RESULTS}/stdout.log |awk '{print $2}'`
@@ -858,11 +870,10 @@ alltests() {
   echo ""
 }
 
-#k6_static
-#k6_scripting
 export_testvars
 export STARTTIME=`date +%y%m%d-%H%M%S`
-#jmeter_static
+#k6_scripting
+#k6_static
 alltests
 exit
 
