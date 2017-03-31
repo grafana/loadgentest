@@ -65,7 +65,7 @@ export TARGETURL="http://109.228.153.2/style.css"
 #export TARGETURL="http://dev-li-david.pantheonsite.io/"
 export CONCURRENT=20
 export REQUESTS=1000
-export DURATION=10
+export DURATION=150
 export NETWORK_DELAY=0
 
 # Compute various useful parameters from REQUESTS, CONCURRENT, DURATION and TARGETURL
@@ -630,6 +630,46 @@ k6_static() {
   sleep 3
 }
 
+bombardier_static() {
+  TESTNAME=${FUNCNAME[0]}
+  echo ""
+  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  mkdir -p ${RESULTS}
+  TIMINGS="${RESULTS}/timings"
+  #_ITERATIONS_PER_VU=`echo "${REQUESTS}/${CONCURRENT}" | bc -l | toint`
+  echo "${TESTNAME}: Executing bombardier --connections ${CONCURRENT} --requests ${REQUESTS} --latencies ${TARGETURL} ... "
+  _START=`date +%s.%N`
+  #${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  bombardier --connections ${CONCURRENT} --requests ${REQUESTS} --latencies ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  #_REQUESTS=`grep 'http_reqs.............:' ${RESULTS}/stdout.log |awk '{print $2}'`
+  _RPS=`grep 'Reqs/sec' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
+  _RTTAVG=`grep 'Latency' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTMAX=`grep 'Latency' ${RESULTS}/stdout.log |awk '{print $4}' |duration2ms`
+  _RTTMIN="-"
+  _RTTp50=`grep '50%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTp75=`grep '75%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTp90=`grep '90%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTp95="-"
+  _RTTp99=`grep '99%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _REQ1xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $3}' | sed 's/,//'`
+  _REQ2xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $6}' | sed 's/,//'`
+  _REQ3xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $9}' | sed 's/,//'`
+  _REQ4xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $12}' | sed 's/,//'`
+  _REQ5xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $15}' | sed 's/,//'`
+  _REQOth=`grep 'others' ${RESULTS}/stdout.log |awk '{print $3}' | sed 's/,//'`
+  _REQUESTS=`expr ${_REQ1xx} + ${_REQ2xx} + ${_REQ3xx} + ${_REQ4xx} + ${_REQ5xx} + ${_REQOth}`
+  _ERRORS=`expr ${_REQUESTS} - ${_REQ2xx} - ${_REQ3xx}`
+  echo ""
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME}: done"
+  echo ""
+  sleep 3
+}
+
 
 # Scripting tests
 locust_scripting() {
@@ -815,6 +855,7 @@ staticurltests() {
   tsung_static
   jmeter_static
   gatling_static
+  bombardier_static
   k6_static
   # Concat all timing files
   LOGDIR=${TESTDIR}/results/${STARTTIME}
@@ -827,6 +868,7 @@ staticurltests() {
       ${LOGDIR}/tsung_static/timings \
       ${LOGDIR}/jmeter_static/timings \
       ${LOGDIR}/gatling_static/timings \
+      ${LOGDIR}/bombardier_static/timings \
       ${LOGDIR}/k6_static/timings \
       >${LOGDIR}/staticurltests.timings
   echo ""
@@ -873,7 +915,7 @@ alltests() {
 export_testvars
 export STARTTIME=`date +%y%m%d-%H%M%S`
 #k6_scripting
-#k6_static
+#bombardier_static
 alltests
 exit
 
@@ -914,6 +956,7 @@ do
   echo "h. Run Jmeter static-URL test"
   echo "i. Run Gatling static-URL test"
   echo "j. Run k6 static-URL test"
+  echo "k. Run Bombardier static-URL test"
   echo ""
   echo "A. Run Locust dynamic scripting test"
   echo "B. Run Grinder dynamic scripting test"
@@ -986,6 +1029,9 @@ do
       ;;
     j)
       [ "${TARGETURL}x" != "x" ] && k6_static
+      ;;
+    k)
+      [ "${TARGETURL}x" != "x" ] && bombardier_static
       ;;
     A)
       [ "${TARGETURL}x" != "x" ] && locust_scripting

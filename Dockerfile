@@ -84,6 +84,9 @@ RUN cd ${TESTDIR} && wget 'http://downloads.sourceforge.net/project/grinder/The%
 RUN npm install -g artillery
 # git clone 'https://github.com/shoreditch-ops/artillery' && git checkout ... && ...
 
+# Bombardier (https://github.com/codesenberg/bombardier)
+RUN go get -u github.com/codesenberg/bombardier
+
 # k6, latest
 #RUN go get -u github.com/loadimpact/k6
 # Below is workaround for https://github.com/loadimpact/k6/issues/165
