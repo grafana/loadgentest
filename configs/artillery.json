@@ -11,7 +11,7 @@
         { "think": 1 },
         {
           "loop": [
-            {"get": {"url": "TARGETPATH"}}
+            {"get": {"url": "TARGETURL"}}
           ],
           "count": REQS_PER_VU
         }

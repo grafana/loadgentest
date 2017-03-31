@@ -9,7 +9,7 @@
 # - Refactor this script and make it more consistent. E.g. how to count # of
 #   lines in a file is sometimes using `wc` + `awk` and sometimes just `awk`
 #   (we should probably skip using `wc` at all, because its output sucks).
-#   Another example: when invoking bc we sometimes use -l (mathlib) and 
+#   Another example: when invoking bc we sometimes use -l (mathlib) and
 #   sometimes not, pretty randomly.
 #
 # - Refactor this script and use more modern bash syntax, e.g. $(cmd) instead of `cmd`
@@ -61,10 +61,11 @@ checkfor mkdir
 checkfor column
 
 # Default settings
-export TARGETURL=""
+export TARGETURL="http://109.228.153.2/style.css"
+#export TARGETURL="http://dev-li-david.pantheonsite.io/"
 export CONCURRENT=20
 export REQUESTS=1000
-export DURATION=10
+export DURATION=150
 export NETWORK_DELAY=0
 
 # Compute various useful parameters from REQUESTS, CONCURRENT, DURATION and TARGETURL
@@ -118,6 +119,7 @@ replace_all() {
 # with max 2 decimals of precision (depending on the precision of the original number -
 # i.e. "0.3s" becomes "300" [ms] but not "300.00" because that implies more precision
 # in the original number than we actually have)
+# 230.69µs
 duration2ms() {
   read X
   UNIT=`echo $X |egrep -o '[mun]?s'`
@@ -228,9 +230,9 @@ apachebench_static() {
   mkdir -p ${RESULTS}
   TIMINGS="${RESULTS}/timings"
   PERCENTAGES=${RESULTS}/percentages
-  echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL}/ ... "
   _START=`date +%s.%N`
-  ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL}/ > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Complete\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
@@ -329,14 +331,17 @@ artillery_static() {
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _TMPDATA=${RESULTS}/transaction_log
-  jq -c '.aggregate.latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
+  jq -c '.intermediate[].latencies[]|{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
   _REQUESTS=`wc -l ${_TMPDATA} |awk '{print $1}'`
   _START_TS=`head -1 ${_TMPDATA} |cut -c7-19`
   _END_TS=`tail -1 ${_TMPDATA} |cut -c7-19`
   _DURATION_MS=`echo "${_END_TS}-${_START_TS}" |bc`
   _RPS=`echo "scale=0; (${_REQUESTS}*1000)/${_DURATION_MS}" |bc`
   _OKNUM=`grep '"code":200' ${_TMPDATA} |wc -l |awk '{print $1}'`
-  _OKRTTTOT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |paste -sd+ |bc -l`
+  _TMPDATA_PASTE="${RESULTS}/paste_tmpdata"
+  _TMPDATA_PASTE_OUT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' >${_TMPDATA_PASTE}`
+  _OKRTTTOT=`paste -sd+ ${_TMPDATA_PASTE} |bc -l`
+  rm "${_TMPDATA_PASTE}"
   _RTTAVGUS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l |toint`
   _RTTAVG=`echo "${_RTTAVGUS}us" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
@@ -379,7 +384,7 @@ vegeta_static() {
   # Vegeta does not report redirect responses, like many other tools. But this means that considering any
   # reported response codes !=200 to be errors is not completely stupid.
   #
-  # Vegeta managed to do 4000 RPS over a 10ms RTT network connection while being configured to 
+  # Vegeta managed to do 4000 RPS over a 10ms RTT network connection while being configured to
   # use 20 concurrent connections. Or so I thought. The -connections option is only a STARTING value
   # that Vegeta may change at runtime as it sees fit. Aargh. This means there is no practical way
   # to control concurrrency in Vegeta.
@@ -395,8 +400,11 @@ vegeta_static() {
   _ENDNS=`tail -1 ${_CSV} |awk -F\, '{print $1}'`
   _DURATIONMS=`echo "(${_ENDNS}-${_STARTNS})/1000000" |bc`
   _RPS=`echo "(${_REQUESTS}*1000)/${_DURATIONMS}" |bc`
-  _RTTTOTMS=`awk -F\, '{print $3/1000000}' ${_CSV} |paste -sd+ |bc -l`
-  _RTTAVG=`echo "${_RTTTOTMS}/${_REQUESTS}" ${_CSV} |bc -l`
+  _TMPDATA_PASTE="${RESULTS}/paste_tmpdata"
+  _TMPDATA_PASTE_OUT=`awk -F\, '{print $3/1000000}' ${_CSV} >${_TMPDATA_PASTE}`
+  _RTTOTMS=`paste -sd+ ${_TMPDATA_PASTE} |bc -l`
+  rm "${_TMPDATA_PASTE}"
+  _RTTAVG=`echo "${_RTTOTMS}/${_REQUESTS}" |bc -l |stripdecimals`
   _RTTMIN=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |head -1 |stripdecimals`
   _RTTMAX=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |tail -1 |stripdecimals`
   _RTTp50=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 50 |stripdecimals`
@@ -430,7 +438,7 @@ siege_static() {
   _RPS=`grep '^Transaction rate:' ${RESULTS}/stderr.log |awk '{print $3}' |toint`
   #
   # Siege reports response time in seconds, with only 2 decimals of precision. In a benchmark it is not unlikely
-  # you will see it report 0.00s response times, or response times that never change. 
+  # you will see it report 0.00s response times, or response times that never change.
   _RTTAVG=`grep '^Response time:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
   #
   # Just like Vegeta, Siege does not report redirect responses. When redirects happen, they are considered part of a
@@ -439,7 +447,7 @@ siege_static() {
   # counter increased instead. This means you can see more "Successful transactions" than "Transactions" (because some
   # were redirected and did not have time to complete the redirected request).
   #
-  _ERRORS="-"
+  _ERRORS=`grep '^Failed transactions:' ${RESULTS}/stderr.log |awk '{print $3}'`
   _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
   _RTTMAX=`grep '^Longest transaction:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
   _RTTp50="-"
@@ -513,7 +521,7 @@ jmeter_static() {
   #
   echo "${TESTNAME}: Executing jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true ... "
   _START=`date +%s.%N`
-  ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  ${TESTDIR}/apache-jmeter-3.1/bin/jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`date +%s.%N`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # TXLOG:
@@ -524,15 +532,15 @@ jmeter_static() {
   _ENDMS=`tail -1 ${TXLOG} |cut -c1-13`
   _REQUESTS=`awk 'END{print NR-1}' ${TXLOG}`
   _RPS=`echo "(${_REQUESTS}*1000)/(${_ENDMS}-${_STARTMS})" |bc`
-  _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$13}END{printf "%.2f", tot/num}' ${TXLOG}`
-  _RTTMIN=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | head -1`
-  _RTTMAX=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | tail -1`
+  _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$2}END{printf "%.2f", tot/num}' ${TXLOG}`
+  _RTTMIN=`awk -F\, 'NR>1{print $2}' ${TXLOG} |sort -n | head -1`
+  _RTTMAX=`awk -F\, 'NR>1{print $2}' ${TXLOG} |sort -n | tail -1`
   _ERRORS=`awk -F\, 'NR>1&&($4<200||$4>=400){print $0}' ${TXLOG} |wc -l |awk '{print $1}'`
-  _RTTp50=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 50`
-  _RTTp75=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 75`
-  _RTTp90=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 90`
-  _RTTp95=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 95`
-  _RTTp99=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 99`
+  _RTTp50=`awk -F\, 'NR>1{print $2}' ${TXLOG} |percentile 50`
+  _RTTp75=`awk -F\, 'NR>1{print $2}' ${TXLOG} |percentile 75`
+  _RTTp90=`awk -F\, 'NR>1{print $2}' ${TXLOG} |percentile 90`
+  _RTTp95=`awk -F\, 'NR>1{print $2}' ${TXLOG} |percentile 95`
+  _RTTp99=`awk -F\, 'NR>1{print $2}' ${TXLOG} |percentile 99`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -587,6 +595,81 @@ gatling_static() {
   sleep 3
 }
 
+k6_static() {
+  TESTNAME=${FUNCNAME[0]}
+  echo ""
+  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  mkdir -p ${RESULTS}
+  TIMINGS="${RESULTS}/timings"
+  _ITERATIONS_PER_VU=`echo "${REQUESTS}/${CONCURRENT}" | bc -l | toint`
+  echo "${TESTNAME}: Executing ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} ... "
+  _START=`date +%s.%N`
+  ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  _REQUESTS=`grep 'http_reqs.............:' ${RESULTS}/stdout.log |awk '{print $2}'`
+  # k6 is not (yet) reporting RPS, calculate it
+  _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`
+  _RTTAVG=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $2}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _OKREQS=`cat ${RESULTS}/k6_json.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | select(.data.tags.status=="200")|length'| wc -l |awk '{print $1}'`
+  _ERRORS=`expr ${_REQUESTS} - ${_OKREQS}`
+  _RTTMIN=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $5}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTMAX=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $3}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTp50=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $4}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  ### cat log.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | .data.value'
+  _RTTp75=`cat ${RESULTS}/k6_json.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | .data.value' |percentile 75 |stripdecimals`
+  _RTTp90=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $6}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTp95=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $7}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTp99=`cat ${RESULTS}/k6_json.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | .data.value' |percentile 99 |stripdecimals`
+  echo ""
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME}: done"
+  echo ""
+  sleep 3
+}
+
+bombardier_static() {
+  TESTNAME=${FUNCNAME[0]}
+  echo ""
+  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  mkdir -p ${RESULTS}
+  TIMINGS="${RESULTS}/timings"
+  #_ITERATIONS_PER_VU=`echo "${REQUESTS}/${CONCURRENT}" | bc -l | toint`
+  echo "${TESTNAME}: Executing bombardier --connections ${CONCURRENT} --requests ${REQUESTS} --latencies ${TARGETURL} ... "
+  _START=`date +%s.%N`
+  #${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  bombardier --connections ${CONCURRENT} --requests ${REQUESTS} --latencies ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  #_REQUESTS=`grep 'http_reqs.............:' ${RESULTS}/stdout.log |awk '{print $2}'`
+  _RPS=`grep 'Reqs/sec' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
+  _RTTAVG=`grep 'Latency' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTMAX=`grep 'Latency' ${RESULTS}/stdout.log |awk '{print $4}' |duration2ms`
+  _RTTMIN="-"
+  _RTTp50=`grep '50%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTp75=`grep '75%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTp90=`grep '90%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _RTTp95="-"
+  _RTTp99=`grep '99%' ${RESULTS}/stdout.log |awk '{print $2}' |duration2ms`
+  _REQ1xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $3}' | sed 's/,//'`
+  _REQ2xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $6}' | sed 's/,//'`
+  _REQ3xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $9}' | sed 's/,//'`
+  _REQ4xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $12}' | sed 's/,//'`
+  _REQ5xx=`grep '1xx' ${RESULTS}/stdout.log |awk '{print $15}' | sed 's/,//'`
+  _REQOth=`grep 'others' ${RESULTS}/stdout.log |awk '{print $3}' | sed 's/,//'`
+  _REQUESTS=`expr ${_REQ1xx} + ${_REQ2xx} + ${_REQ3xx} + ${_REQ4xx} + ${_REQ5xx} + ${_REQOth}`
+  _ERRORS=`expr ${_REQUESTS} - ${_REQ2xx} - ${_REQ3xx}`
+  echo ""
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME}: done"
+  echo ""
+  sleep 3
+}
+
 
 # Scripting tests
 locust_scripting() {
@@ -612,7 +695,7 @@ locust_scripting() {
     _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`
   fi
   _RTTAVG=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $5}' |stripdecimals`
-  _RTTMIN="-"
+  _RTTMIN=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $6}'`
   _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $12}'`
   _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $4}'`
   _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $6}'`
@@ -667,7 +750,7 @@ grinder_scripting() {
   _ERRORS=`expr ${_REQUESTS} - ${_OKREQUESTS}`
   # Calculate RPS. We assume we ran for the exact DURATION.
   _RPS=`echo "scale=0; ${_REQUESTS}/${DURATION};" |bc`
-  # Calculate the average for all the response times. 
+  # Calculate the average for all the response times.
   _RTTAVG=`awk 'BEGIN{num=0;tot=0}{num=num+1;tot=tot+$1}END{print tot/num}' ${TMP} |stripdecimals`
   _RTTMIN=`cat ${TMP} |sort -n |head -1 |awk '{print $1}'`
   _RTTMAX=`cat ${TMP} |sort -n |tail -1 |awk '{print $1}'`
@@ -717,6 +800,51 @@ wrk_scripting() {
   sleep 3
 }
 
+k6_scripting() {
+  TESTNAME=${FUNCNAME[0]}
+  echo ""
+  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  mkdir -p ${RESULTS}
+  TIMINGS="${RESULTS}/timings"
+  CFG=${TESTDIR}/configs/k6_${STARTTIME}.js
+  replace_all ${TESTDIR}/configs/k6.js ${CFG}
+  _ITERATIONS_PER_VU=`echo "${REQUESTS}/${CONCURRENT}" | bc -l | toint`
+  echo "${TESTNAME}: Executing ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${CFG} ... "
+  _START=`date +%s.%N`
+  ${TESTDIR}/k6-v0.11.0-linux64/k6 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=${RESULTS}/k6_json.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+#  mkdir -p k6_tmp && cd k6_tmp && cp ${CFG} k6tmp.js
+#  _PWD=`pwd`
+#  echo "${TESTNAME}: Executing docker run -v ${_PWD}:${_PWD} -w ${_PWD} loadimpact/k6:0.11.0 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=k6_json.json k6_${STARTTIME}.js 2>&1 | tee -a stdout.log ... "
+#  _START=`date +%s.%N`
+#  cat k6tmp.js
+#  docker run -v ${_PWD}:${_PWD} -w ${_PWD} loadimpact/k6:0.11.0 run --iterations ${_ITERATIONS_PER_VU} --vus ${CONCURRENT} --out json=k6_json.json k6tmp.js 2>&1 | tee -a stdout.log
+#  cp stdout.log ${RESULTS}/stdout.log && cp k6_json.json ${RESULTS}/k6_json.json && cd .. && rm -rf k6_tmp
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  _REQUESTS=`grep 'http_reqs.............:' ${RESULTS}/stdout.log |awk '{print $2}'`
+  # k6 is not (yet) reporting RPS, calculate it
+  _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`
+  _RTTAVG=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $2}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _OKREQS=`cat ${RESULTS}/k6_json.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | select(.data.tags.status=="200")|length'| wc -l |awk '{print $1}'`
+  _ERRORS=`expr ${_REQUESTS} - ${_OKREQS}`
+  _RTTMIN=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $5}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTMAX=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $3}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTp50=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $4}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  ### cat log.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | .data.value'
+  _RTTp75=`cat ${RESULTS}/k6_json.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | .data.value' |percentile 75 |stripdecimals`
+  _RTTp90=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $6}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTp95=`grep 'http_req_duration.....:' ${RESULTS}/stdout.log |awk '{print $7}' | sed 's/,//' |tr "=" " "| sed 's/µ/u/' |awk '{print $2}' |duration2ms`
+  _RTTp99=`cat ${RESULTS}/k6_json.json | jq 'select(.type == "Point") | select(.metric=="http_req_duration") | .data.value' |percentile 99 |stripdecimals`
+  echo ""
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME}: done"
+  echo ""
+  sleep 3
+}
+
+
 staticurltests() {
   apachebench_static
   boom_static
@@ -727,6 +855,8 @@ staticurltests() {
   tsung_static
   jmeter_static
   gatling_static
+  bombardier_static
+  k6_static
   # Concat all timing files
   LOGDIR=${TESTDIR}/results/${STARTTIME}
   cat ${LOGDIR}/apachebench_static/timings \
@@ -738,6 +868,8 @@ staticurltests() {
       ${LOGDIR}/tsung_static/timings \
       ${LOGDIR}/jmeter_static/timings \
       ${LOGDIR}/gatling_static/timings \
+      ${LOGDIR}/bombardier_static/timings \
+      ${LOGDIR}/k6_static/timings \
       >${LOGDIR}/staticurltests.timings
   echo ""
   echo "---------------------------------------------------------- Static URL test results ------------------------------------------------------------"
@@ -750,11 +882,13 @@ scriptingtests() {
   locust_scripting
   grinder_scripting
   wrk_scripting
+  k6_scripting
   # Concat all timing files
   LOGDIR=${TESTDIR}/results/${STARTTIME}
   cat ${LOGDIR}/locust_scripting/timings \
       ${LOGDIR}/grinder_scripting/timings \
       ${LOGDIR}/wrk_scripting/timings \
+      ${LOGDIR}/k6_scripting/timings \
       >${LOGDIR}/scriptingtests.timings
   echo ""
   echo "------------------------------------------------------ Dynamic scripting test results --------------------------------------------------------"
@@ -778,6 +912,12 @@ alltests() {
   echo ""
 }
 
+export_testvars
+export STARTTIME=`date +%y%m%d-%H%M%S`
+#k6_scripting
+#bombardier_static
+alltests
+exit
 
 clear
 while [ 1 ]
@@ -815,14 +955,17 @@ do
   echo "g. Run Tsung static-URL test"
   echo "h. Run Jmeter static-URL test"
   echo "i. Run Gatling static-URL test"
+  echo "j. Run k6 static-URL test"
+  echo "k. Run Bombardier static-URL test"
   echo ""
   echo "A. Run Locust dynamic scripting test"
   echo "B. Run Grinder dynamic scripting test"
   echo "C. Run Wrk dynamic scripting test"
+  echo "D. Run k6 dynamic scripting test"
   echo ""
   echo "X. Escape to bash"
   echo ""
-  echo -n "Select (1-7,a-h,A-D,R,X): "
+  echo -n "Select (1-7,a-j,A-D,R,X): "
   read ans
   # Record start time
   export STARTTIME=`date +%y%m%d-%H%M%S`
@@ -884,6 +1027,12 @@ do
     i)
       [ "${TARGETURL}x" != "x" ] && gatling_static
       ;;
+    j)
+      [ "${TARGETURL}x" != "x" ] && k6_static
+      ;;
+    k)
+      [ "${TARGETURL}x" != "x" ] && bombardier_static
+      ;;
     A)
       [ "${TARGETURL}x" != "x" ] && locust_scripting
       ;;
@@ -892,6 +1041,9 @@ do
       ;;
     C)
       [ "${TARGETURL}x" != "x" ] && wrk_scripting
+      ;;
+    D)
+      [ "${TARGETURL}x" != "x" ] && k6_scripting
       ;;
     R)
       echo -n "Enter extra network delay to add (ms) : "
@@ -903,7 +1055,7 @@ do
         echo "tc qdisc change dev eth0 root netem delay ${ans}ms"
         tc qdisc change dev eth0 root netem delay ${ans}ms
       fi
-      if [ $? -ne 0 ] ; then 
+      if [ $? -ne 0 ] ; then
         echo "Failed to set network delay. Try running docker image with --cap-add=NET_ADMIN"
       else
         export NETWORK_DELAY=$ans

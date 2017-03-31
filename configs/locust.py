@@ -2,7 +2,7 @@ from locust import HttpLocust, TaskSet
 
 def stylesheet(l):
     for i in range(100):
-      l.client.get("TARGETPATH")
+      l.client.get("TARGETURL")
 
 class UserBehavior(TaskSet):
     tasks = {stylesheet:1}

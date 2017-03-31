@@ -1,4 +1,4 @@
-FROM ubuntu:14.04
+  FROM ubuntu:14.04
 
 RUN apt-get update
 
@@ -37,7 +37,7 @@ ENV PATH ${GOPATH}/bin:${GOROOT}/bin:/usr/local/bin:${PATH}
 # Create .gitconfig
 COPY Gitconfig ${HOME}/.gitconfig
 
-# Get and compile wrk 
+# Get and compile wrk
 RUN cd ${TESTDIR} && git clone 'https://github.com/wg/wrk'
 RUN cd ${TESTDIR}/wrk && make
 # Checkout specific commit that we know runtest.sh is compatible with
@@ -74,7 +74,7 @@ RUN cd ${TESTDIR} && wget 'https://repo1.maven.org/maven2/io/gatling/highcharts/
   unzip gatling-charts-highcharts-bundle-2.2.2-bundle.zip && rm gatling-charts-highcharts-bundle-2.2.2-bundle.zip
 
 # Jmeter 3.0
-RUN cd ${TESTDIR} && wget -O - 'http://apache.mirrors.spacedump.net//jmeter/binaries/apache-jmeter-3.0.tgz' |tar -zxf -
+RUN cd ${TESTDIR} && wget -O - 'http://www-us.apache.org/dist//jmeter/binaries/apache-jmeter-3.1.tgz' |tar -zxf -
 
 # Grinder 3.11
 RUN cd ${TESTDIR} && wget 'http://downloads.sourceforge.net/project/grinder/The%20Grinder%203/3.11/grinder-3.11-binary.zip' && \
@@ -83,6 +83,14 @@ RUN cd ${TESTDIR} && wget 'http://downloads.sourceforge.net/project/grinder/The%
 # Artillery (>=1.5.0-12)
 RUN npm install -g artillery
 # git clone 'https://github.com/shoreditch-ops/artillery' && git checkout ... && ...
+
+# Bombardier (https://github.com/codesenberg/bombardier)
+RUN go get -u github.com/codesenberg/bombardier
+
+# k6, latest
+#RUN go get -u github.com/loadimpact/k6
+# Below is workaround for https://github.com/loadimpact/k6/issues/165
+RUN cd ${TESTDIR} && wget -O - 'https://github.com/loadimpact/k6/releases/download/v0.11.0/k6-v0.11.0-linux64.tar.gz' |tar -zxf -
 
 COPY runtests.sh ${TESTDIR}
 RUN chmod 755 ${TESTDIR}/runtests.sh
@@ -97,6 +105,6 @@ COPY configs/grinder.py ${TESTDIR}/configs
 COPY configs/grinder.properties ${TESTDIR}/configs
 COPY configs/locust.py ${TESTDIR}/configs
 COPY configs/wrk.lua ${TESTDIR}/configs
+COPY configs/k6.js ${TESTDIR}/configs
 
 CMD ${TESTDIR}/runtests.sh
-
