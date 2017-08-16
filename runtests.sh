@@ -717,6 +717,41 @@ wrk_scripting() {
   sleep 3
 }
 
+k6_scripting() {
+  TESTNAME=${FUNCNAME[0]}
+  echo ""
+  echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  mkdir -p ${RESULTS}
+  TIMINGS="${RESULTS}/timings"
+  CFG=${TESTDIR}/configs/k6_${STARTTIME}.js
+  replace_all ${TESTDIR}/configs/k6.js ${CFG}
+  echo "${TESTNAME}: Executing k6 run --vus ${CONCURRENT} --duration ${DURATION}s --out json=${RESULTS}/output.json ${CFG} ... "
+  _START=`date +%s.%N`
+  k6 run --vus ${CONCURRENT} --duration ${DURATION}s --out json=${RESULTS}/output.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`date +%s.%N`
+  _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
+  # XXX TODO: use JSON output instead
+  _REQUESTS=`grep "http_reqs..." ${RESULTS}/stdout.log |tail -1 |awk '{print $2}'`
+  _RPS=`grep "http_reqs..." ${RESULTS}/stdout.log |tail -1 |awk '{print $3}' |egrep -o '[0-9]*\.[0-9]*' |toint`
+  _RTTAVG=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'avg=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTMIN=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'min=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTMAX=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'max=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTp50=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'med=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTp75="-"
+  _RTTp90=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'p\(90\)=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTp95=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'p\(95\)=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTp99="-"
+  _ERRORS="-"
+  echo ""
+  echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
+  report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
+  echo "${TESTNAME}: done"
+  echo ""
+  sleep 3
+}
+
+
 staticurltests() {
   apachebench_static
   boom_static
@@ -750,11 +785,13 @@ scriptingtests() {
   locust_scripting
   grinder_scripting
   wrk_scripting
+  k6_scripting
   # Concat all timing files
   LOGDIR=${TESTDIR}/results/${STARTTIME}
   cat ${LOGDIR}/locust_scripting/timings \
       ${LOGDIR}/grinder_scripting/timings \
       ${LOGDIR}/wrk_scripting/timings \
+      ${LOGDIR}/k6_scripting/timings \
       >${LOGDIR}/scriptingtests.timings
   echo ""
   echo "------------------------------------------------------ Dynamic scripting test results --------------------------------------------------------"
@@ -785,7 +822,7 @@ do
   export_testvars
   echo ""
   echo "################################################"
-  echo "#  Load Impact load generator test suite V1.0  #"
+  echo "#  Load Impact load generator test suite V1.1  #"
   echo "################################################"
   echo ""
   echo "1. Choose target URL (current: ${TARGETURL})"
@@ -819,10 +856,11 @@ do
   echo "A. Run Locust dynamic scripting test"
   echo "B. Run Grinder dynamic scripting test"
   echo "C. Run Wrk dynamic scripting test"
+  echo "D. Run k6 dynamic scripting test"
   echo ""
   echo "X. Escape to bash"
   echo ""
-  echo -n "Select (1-7,a-h,A-D,R,X): "
+  echo -n "Select (1-7,a-i,A-D,R,X): "
   read ans
   # Record start time
   export STARTTIME=`date +%y%m%d-%H%M%S`
@@ -892,6 +930,9 @@ do
       ;;
     C)
       [ "${TARGETURL}x" != "x" ] && wrk_scripting
+      ;;
+    D)
+      [ "${TARGETURL}x" != "x" ] && k6_scripting
       ;;
     R)
       echo -n "Enter extra network delay to add (ms) : "

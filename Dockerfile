@@ -51,6 +51,9 @@ RUN go get -u github.com/rakyll/boom
 RUN go get -u github.com/tsenart/vegeta
 # runtest.sh works with this commit: https://github.com/tsenart/vegeta/commit/7cff4dc0ed44f0a8b9777caf050950eb67972f43
 
+# Get and compile k6 (latest snapshop)
+RUN go get -u github.com/loadimpact/k6
+
 # Install Apachebench (>=2.3)
 RUN apt-get -y install apache2-utils
 # How install specific version of ab?
@@ -73,8 +76,8 @@ RUN pip install locustio
 RUN cd ${TESTDIR} && wget 'https://repo1.maven.org/maven2/io/gatling/highcharts/gatling-charts-highcharts-bundle/2.2.2/gatling-charts-highcharts-bundle-2.2.2-bundle.zip' && \
   unzip gatling-charts-highcharts-bundle-2.2.2-bundle.zip && rm gatling-charts-highcharts-bundle-2.2.2-bundle.zip
 
-# Jmeter 3.0
-RUN cd ${TESTDIR} && wget -O - 'http://apache.mirrors.spacedump.net//jmeter/binaries/apache-jmeter-3.0.tgz' |tar -zxf -
+# Jmeter 3.2
+RUN cd ${TESTDIR} && wget -O - 'http://apache.mirrors.spacedump.net//jmeter/binaries/apache-jmeter-3.2.tgz' |tar -zxf -
 
 # Grinder 3.11
 RUN cd ${TESTDIR} && wget 'http://downloads.sourceforge.net/project/grinder/The%20Grinder%203/3.11/grinder-3.11-binary.zip' && \
@@ -97,6 +100,7 @@ COPY configs/grinder.py ${TESTDIR}/configs
 COPY configs/grinder.properties ${TESTDIR}/configs
 COPY configs/locust.py ${TESTDIR}/configs
 COPY configs/wrk.lua ${TESTDIR}/configs
+COPY configs/k6.js ${TESTDIR}/configs
 
 CMD ${TESTDIR}/runtests.sh
 
