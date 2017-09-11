@@ -1,0 +1,12 @@
+FROM java:8-jdk-alpine
+
+ENV JMETER_VERSION 3.2
+
+RUN apk --update --no-cache add \
+	wget
+
+RUN cd /bin && \
+    wget -O - 'http://apache.mirrors.spacedump.net//jmeter/binaries/apache-jmeter-'${JMETER_VERSION}'.tgz' |tar -zxf -
+
+ENTRYPOINT /bin/apache-jmeter-${JMETER_VERSION}/bin/jmeter
+CMD ["--help"]
