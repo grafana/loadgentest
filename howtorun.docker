@@ -1,0 +1,68 @@
+# artillery not working on snik1
+# no public dockerhub image, but official docker config on Github
+git clone https://github.com/shoreditch-ops/artillery-docker
+cd <x>
+docker build -t artillery .
+docker run -i artillery dino
+
+# No dominant images on Dockerhub
+git clone 'https://github.com/lucor/docker-ab'
+cd <x>
+docker build -t ab .
+docker run -i ab
+
+docker pull skandyla/wrk
+docker run --rm skandyla/wrk
+
+docker pull williamyeh/boom
+docker run --rm williamyeh/boom
+
+docker pull oba11/vegeta
+docker run --rm oba11/vegeta
+
+docker pull rufus/siege-engine
+docker run --rm -i rufus/siege-engine
+
+docker pull prima/tsung
+docker run --rm -i prima/tsung
+
+docker pull theidledeveloper/docker-jmeter
+docker run --rm \
+-v ${pwd}:/data \
+theidledeveloper/docker-jmeter \
+-n -t /data/test-plan.jmx -l /data/file.jtl -e -o /data/report
+
+# Most popular Gatling image on Docker hub
+docker pull denvazh/gatling
+docker run -it --rm -v `pwd`:/opt/gatling/conf -v `pwd`:/opt/gatling/user-files -v `pwd`:/opt/gatling/results denvazh/gatling -sf /opt/gatling/conf -s GatlingSimulation
+
+
+docker pull christianbladescb/locustio
+
+
+
+
+FROM ruby:2.2.2
+
+RUN apt-get update && apt-get install -y unzip wget && rm -rf /var/lib/apt/lists/*
+
+# Default to UTF-8 file.encoding
+ENV LANG C.UTF-8
+
+ENV JAVA_VERSION 7u79
+ENV JAVA_DEBIAN_VERSION 7u79-2.5.5-1~deb8u1
+
+RUN apt-get update && apt-get install -y openjdk-7-jdk && rm -rf /var/lib/apt/lists/*
+
+RUN wget -P /tmp/ http://central.maven.org/maven2/net/sf/grinder/grinder/3.11/grinder-3.11-binary.zip && \
+    unzip /tmp/grinder-3.11-binary.zip -d /opt/ && \
+    cd /opt && ln -s grinder-3.11 grinder
+
+CMD bash
+
+
+
+
+
+# XXX TODO 1: make runtest.sh run all tools via docker images
+# XXX TODO 2: build our own docker images for each tool, using the same base image (some Alpine image, I think)
