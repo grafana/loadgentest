@@ -28,37 +28,40 @@
 #
 
 # Try to guess TESTDIR if it is not set
-[ -z $TESTDIR ] && export TESTDIR=/loadgentests
+[ -z $TESTDIR ] && export TESTDIR=`pwd`
 
 # Check that we have some needed tools
 checkfor() {
   which $1 >/dev/null
-  if [ $? -ne 0 ]; then
-    echo "Error: failed to find \"${1}\" (PATH=$PATH)"
-    exit 1
+  FOUND=$?
+  if [ $FOUND -ne 0 ]; then
+    echo "WARNING: Failed to find \"${1}\" (PATH=$PATH)"
   fi
+  return $FOUND
 }
-checkfor which
-checkfor cp
-checkfor mv
-checkfor rm
-checkfor bc
-checkfor jq
-checkfor wc
-checkfor tc
-checkfor cat
-checkfor tee
-checkfor awk
-checkfor sed
-checkfor cut
-checkfor grep
-checkfor expr
-checkfor echo
-checkfor tail
-checkfor ping
-checkfor egrep
-checkfor mkdir
-checkfor column
+checkfor which || exit 1
+checkfor cp || exit 1
+checkfor mv || exit 1
+checkfor rm || exit 1
+checkfor bc || exit 1
+checkfor jq || exit 1
+checkfor wc || exit 1
+checkfor tc || export NO_TC=1
+checkfor cat || exit 1
+checkfor tee || exit 1
+checkfor awk || exit 1
+checkfor sed || exit 1
+checkfor cut || exit 1
+checkfor grep || exit 1
+checkfor expr || exit 1
+checkfor echo || exit 1
+checkfor tail || exit 1
+checkfor ping || exit 1
+checkfor egrep || exit 1
+checkfor mkdir || exit 1
+checkfor uname || exit 1
+checkfor column || exit 1
+checkfor docker || exit 1
 
 # Default settings
 export TARGETURL=""
@@ -66,6 +69,9 @@ export CONCURRENT=20
 export REQUESTS=1000
 export DURATION=10
 export NETWORK_DELAY=0
+
+# Check which OS we're on
+export OS=`uname -s`
 
 # Compute various useful parameters from REQUESTS, CONCURRENT, DURATION and TARGETURL
 export_testvars() {
@@ -110,7 +116,7 @@ replace_all() {
   replace $DEST "TARGETPATH" "${TARGETPATH}"
   replace $DEST "TARGETURL" "${TARGETURL}"
   replace $DEST "TARGETBASEURL" "${TARGETBASEURL}"
-  replace $DEST "LOGDIR" "${RESULTS}"
+  replace $DEST "LOGDIR" "${RESULTS_D}"
   replace $DEST "TSUNG_MAXUSERS" "${TSUNG_MU}"
 }
 
@@ -204,7 +210,7 @@ report() {
 
 # Take a decimal or integer number and strip it to at most 2-digit precision
 stripdecimals() {
-  X=`egrep -o '^[0-9]*\.?[0-9]?[0-9]?'`
+  X=`egrep -o '^[0-9]*\.?[0-9]?[0-9]?' |awk 'NR==1{print $1}'`
   echo "if (${X}>0 && ${X}<1) print 0; ${X}" |bc
 }
 
@@ -214,6 +220,23 @@ toint() {
   echo "scale=0; ${X}/1" |bc
 }
 
+gettimestamp() {
+  if [ "${OS}x" = "Darwinx" ]; then
+      # Seconds since epoch, with nanosecond resolution, for MacOS
+      cat <<EOF |perl
+        #!/usr/bin/env perl
+        use strict;
+        use warnings;
+        use Time::HiRes qw(gettimeofday);
+        use POSIX       qw(strftime);
+        my (\$s,\$us) = gettimeofday();
+        printf "%s.%06d\n", \$s, \$us;
+EOF
+      return
+  else
+    date '+%s.%N'
+  fi
+}
 
 #
 # And here comes the actual tests!
@@ -224,14 +247,19 @@ apachebench_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  # Paths to results on host machine
   RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
+  TIMINGS=${RESULTS}/timings
   PERCENTAGES=${RESULTS}/percentages
-  echo "${TESTNAME}: Executing ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
-  _START=`date +%s.%N`
-  ab -k -e ${PERCENTAGES} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  # Paths to results in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  PERCENTAGES_D=${RESULTS_D}/percentages
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:ab -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:ab -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
+  echo "${_END} - ${_START}" |bc
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Complete\ requests:' ${RESULTS}/stdout.log |awk '{print $3}'`
   _RPS=`grep '^Requests\ per\ second:' ${RESULTS}/stdout.log |awk '{print $4}' |toint`
@@ -256,15 +284,18 @@ wrk_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to results on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
+  TIMINGS=${RESULTS}/timings
+  # Paths to results in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
   # Note that we supply TARGETURL on the cmd line as wrk requires that, but the cmd line parameter will
   # not be used as our script decides what URL to load (which will of course be the same TARGETURL though)
-  echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
-  _START=`date +%s.%N`
-  ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
   _RPS=`grep '^Requests/sec:' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
   _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
@@ -285,15 +316,18 @@ wrk_static() {
   sleep 3
 }
 
-boom_static() {
+hey_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to results on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
-  boom -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  TIMINGS=${RESULTS}/timings
+  # Paths to results in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:hey -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:hey -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _RPS=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Requests/sec:' |awk '{print $2}' |toint`
   _DURATION=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Total:' |awk '{print $2}' |stripdecimals`
   _REQUESTS=`grep '\[200\]' ${RESULTS}/stdout.log |grep ' responses' |awk '{print $2}'`
@@ -318,41 +352,57 @@ artillery_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to things on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  CFG=${TESTDIR}/configs/artillery_${STARTTIME}.json
-  replace_all ${TESTDIR}/configs/artillery.json ${CFG}
-  TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing artillery run -o ${RESULTS}/artillery_report.json ${CFG}"
-  _START=`date +%s.%N`
-  artillery run -o ${RESULTS}/artillery_report.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
+  TIMINGS=${RESULTS}/timings
+  CFG=${CONFIGS}/artillery_${STARTTIME}.json
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  CFG_D=${CONFIGS_D}/artillery_${STARTTIME}.json
+  replace_all ${CONFIGS}/artillery.json ${CFG}
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D}"
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _TMPDATA=${RESULTS}/transaction_log
-  jq -c '.aggregate.latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
+  jq -c '.intermediate[0].latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
+  echo CP1
   _REQUESTS=`wc -l ${_TMPDATA} |awk '{print $1}'`
-  _START_TS=`head -1 ${_TMPDATA} |cut -c7-19`
-  _END_TS=`tail -1 ${_TMPDATA} |cut -c7-19`
+  echo CP2
+  _START_TS=`head -1 ${_TMPDATA} |awk -F: '{print $4}' |cut -c1-13`
+  echo CP3
+  _END_TS=`tail -1 ${_TMPDATA} |awk -F: '{print $4}' |cut -c1-13`
+  echo CP4
   _DURATION_MS=`echo "${_END_TS}-${_START_TS}" |bc`
+  echo CP5
   _RPS=`echo "scale=0; (${_REQUESTS}*1000)/${_DURATION_MS}" |bc`
+  echo CP6
   _OKNUM=`grep '"code":200' ${_TMPDATA} |wc -l |awk '{print $1}'`
-  _OKRTTTOT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |paste -sd+ |bc -l`
+  echo CP7
+  _OKRTTTOT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |paste -sd+ - |bc -l`
+  echo CP8
   _RTTAVGUS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l |toint`
+  echo CP9
   _RTTAVG=`echo "${_RTTAVGUS}us" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
-  _RTTMINUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |sort -n |head -1`
+  _RTTMINUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |sort -n |head -1`
   _RTTMIN=`echo "${_RTTMINUS}us" |duration2ms`
-  _RTTMAXUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |sort -n |tail -1`
+  _RTTMAXUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |sort -n |tail -1`
   _RTTMAX=`echo "${_RTTMAXUS}us" |duration2ms`
-  _RTTp50US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 50`
+  _RTTp50US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 50`
   _RTTp50=`echo "${_RTTp50US}us" |duration2ms`
-  _RTTp75US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 75`
+  _RTTp75US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 75`
   _RTTp75=`echo "${_RTTp75US}us" |duration2ms`
-  _RTTp90US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 90`
+  _RTTp90US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 90`
   _RTTp90=`echo "${_RTTp90US}us" |duration2ms`
-  _RTTp95US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 95`
+  _RTTp95US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 95`
   _RTTp95=`echo "${_RTTp95US}us" |duration2ms`
-  _RTTp99US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $4}' |awk -F\} '{print int($1/1000)}' |percentile 99`
+  _RTTp99US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 99`
   _RTTp99=`echo "${_RTTp99US}us" |duration2ms`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
@@ -366,14 +416,17 @@ vegeta_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
-  # Vegeta only supports static request rates. You might want to change the REQUESTS parameter until you get the highest throughput w/o errors.
+  # Paths to things on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
-  _START=`date +%s.%N`
-  echo "GET ${TARGETURL}" |vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s >${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  TIMINGS=${RESULTS}/timings
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  # Vegeta only supports static request rates. You might want to change the REQUESTS parameter until you get the highest throughput w/o errors.
+  echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" | docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
+  _START=`gettimestamp`
+  echo "GET ${TARGETURL}" |docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s >${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   #
   # Vegeta does not report redirect responses, like many other tools. But this means that considering any
@@ -389,14 +442,14 @@ vegeta_static() {
   # (note that Vegeta inserts no CSV header in the CSV dump; the first line is the first data point)
   #
   _CSV=${RESULTS}/vegeta_dump.csv
-  vegeta dump -dumper csv <${RESULTS}/stdout.log >${_CSV}
+  docker run -i loadimpact/loadgentest:vegeta dump -dumper csv <${RESULTS}/stdout.log >${_CSV}
   _REQUESTS=`awk 'END{print NR}' ${_CSV}`
   _STARTNS=`head -1 ${_CSV} |awk -F\, '{print $1}'`
   _ENDNS=`tail -1 ${_CSV} |awk -F\, '{print $1}'`
   _DURATIONMS=`echo "(${_ENDNS}-${_STARTNS})/1000000" |bc`
   _RPS=`echo "(${_REQUESTS}*1000)/${_DURATIONMS}" |bc`
-  _RTTTOTMS=`awk -F\, '{print $3/1000000}' ${_CSV} |paste -sd+ |bc -l`
-  _RTTAVG=`echo "${_RTTTOTMS}/${_REQUESTS}" ${_CSV} |bc -l`
+  _RTTTOTMS=`awk -F\, '{print $3/1000000}' ${_CSV} |paste -sd+ - |bc -l`
+  _RTTAVG=`echo "${_RTTTOTMS}/${_REQUESTS}" |bc -l |stripdecimals`
   _RTTMIN=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |head -1 |stripdecimals`
   _RTTMAX=`awk -F\, '{print $3/1000000}' ${_CSV} |sort -n |tail -1 |stripdecimals`
   _RTTp50=`awk -F\, '{print $3/1000000}' ${_CSV} |percentile 50 |stripdecimals`
@@ -418,35 +471,43 @@ siege_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to things on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  echo "${TESTNAME}: Executing siege -b -t ${DURATION}S -q -c ${CONCURRENT} -l ${RESULTS}/siege.log ${TARGETURL} ... "
-  _START=`date +%s.%N`
-  siege -b -t ${DURATION}S -q -c ${CONCURRENT} -l ${RESULTS}/siege.log ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  TIMINGS=${RESULTS}/timings
+  # We don't need paths in the Docker instance as it seems more or less impossible
+  # to get Siege to create a logfile. At the very least it seems to blatantly ignore
+  # the -l flag.
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -c ${CONCURRENT} ${TARGETURL} ... "
+  _START=`gettimestamp`
+  # -q flag now (since Siege v4?) suppresses ALL useful output to stdout and stderr (but retains some three lines of
+  # useless text? - e.g. "The server is now under siege..." - sent to stderr). This means we can't use -q 
+  # anymore, or we get no statistics. Problem is, without the flag we get one line of output to stdout for each and 
+  # every HTTP transaction. There doesn't seem to be a mode in which we get summary statistics without also enabling
+  # per-request statistics output. We don't know if output from the Docker instance sent stdout on the host machine 
+  # could become a bottleneck here, so to be on the safe side we disable stdout output to the user and just store
+  # it in a file, for later processing.
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -c ${CONCURRENT} ${TARGETURL} > ${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`
   _RPS=`grep '^Transaction rate:' ${RESULTS}/stderr.log |awk '{print $3}' |toint`
-  #
   # Siege reports response time in seconds, with only 2 decimals of precision. In a benchmark it is not unlikely
   # you will see it report 0.00s response times, or response times that never change. 
   _RTTAVG=`grep '^Response time:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
-  #
   # Just like Vegeta, Siege does not report redirect responses. When redirects happen, they are considered part of a
   # "successful transaction". Also interesting is how a 3xx response will increase the "successful transactions" counter
   # but if the redirected response does then not return 2xx or 3xx, the counter will be decreased again and the error
   # counter increased instead. This means you can see more "Successful transactions" than "Transactions" (because some
   # were redirected and did not have time to complete the redirected request).
-  #
-  _ERRORS="-"
+  _ERRORS=`grep '^Failed transactions:' ${RESULTS}/stderr.log |awk '{print $3}' |toint`
   _RTTMIN=`grep '^Shortest transaction:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
   _RTTMAX=`grep '^Longest transaction:' ${RESULTS}/stderr.log |awk '{print $3}' |duration2ms`
-  _RTTp50="-"
-  _RTTp75="-"
-  _RTTp90="-"
-  _RTTp95="-"
-  _RTTp99="-"
+  _RTTp50=`grep "secs:" ${RESULTS}/stdout.log |awk '$2=="200"{print $3*1000}' |percentile 50 |stripdecimals`
+  _RTTp75=`grep "secs:" ${RESULTS}/stdout.log |awk '$2=="200"{print $3*1000}' |percentile 75 |stripdecimals`
+  _RTTp90=`grep "secs:" ${RESULTS}/stdout.log |awk '$2=="200"{print $3*1000}' |percentile 90 |stripdecimals`
+  _RTTp95=`grep "secs:" ${RESULTS}/stdout.log |awk '$2=="200"{print $3*1000}' |percentile 95 |stripdecimals`
+  _RTTp99=`grep "secs:" ${RESULTS}/stdout.log |awk '$2=="200"{print $3*1000}' |percentile 99 |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -459,17 +520,24 @@ tsung_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to things on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  CFG=${TESTDIR}/configs/tsung_${STARTTIME}.xml
-  replace_all ${TESTDIR}/configs/tsung.xml ${CFG}
-  echo "${TESTNAME}: Executing tsung -l ${RESULTS} -f ${CFG} start ... "
-  _START=`date +%s.%N`
-  tsung -l ${RESULTS} -f ${CFG} start > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
+  TIMINGS=${RESULTS}/timings
+  CFG=${CONFIGS}/tsung_${STARTTIME}.xml
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  CFG_D=${CONFIGS_D}/tsung_${STARTTIME}.xml
+  replace_all ${CONFIGS}/tsung.xml ${CFG}
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start ... "
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  _LOGDIR=`grep '^Log directory is:' ${RESULTS}/stdout.log |awk '{print $4}'`
+  _LOGDIR="${RESULTS}/"`grep '^Log directory is:' ${RESULTS}/stdout.log |awk '{print $4}' |awk -F\/ '{print $NF}'`
   _STARTMS=`head -2 ${_LOGDIR}/tsung.dump | tail -1 |awk -F\; '{print $1}' |cut -c1-14 |sed 's/\.//'`
   _ENDMS=`tail -1 ${_LOGDIR}/tsung.dump |awk -F\; '{print $1}' |cut -c1-14 |sed 's/\.//'`
   _REQUESTS=`awk 'END{print NR-1}' ${_LOGDIR}/tsung.dump`
@@ -500,21 +568,30 @@ jmeter_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to things on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  CFG=${TESTDIR}/configs/jmeter_${STARTTIME}.xml
-  # TODO: support for protocols other than plain HTTP... we dont specify protocol in the test plan ATM
-  replace_all ${TESTDIR}/configs/jmeter.xml ${CFG}
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
+  TIMINGS=${RESULTS}/timings
+  CFG=${CONFIGS}/jmeter_${STARTTIME}.xml
   JMETERLOG=${RESULTS}/jmeter.log
   TXLOG=${RESULTS}/transactions.csv
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  CFG_D=${CONFIGS_D}/jmeter_${STARTTIME}.xml
+  replace_all ${CONFIGS}/jmeter.xml ${CFG}
+  # TODO: support for protocols other than plain HTTP... we dont specify protocol in the test plan ATM
+  JMETERLOG_D=${RESULTS_D}/jmeter.log
+  TXLOG_D=${RESULTS_D}/transactions.csv
   #
   # useNanoTime=true doesn't seem to work. I'm probably doing something wrong.
   #
-  echo "${TESTNAME}: Executing jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true ... "
-  _START=`date +%s.%N`
-  ${TESTDIR}/apache-jmeter-3.0/bin/jmeter -n -t ${CFG} -j ${JMETERLOG} -l ${TXLOG} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true ... "
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # TXLOG:
   #timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,grpThreads,allThreads,Latency,IdleTime
@@ -545,22 +622,30 @@ gatling_static() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  # Paths to things on host machine
   RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  SIMULATIONDIR=${TESTDIR}/configs/Gatling_${STARTTIME}
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
+  SIMULATIONDIR=${CONFIGS}/Gatling_${STARTTIME}
   mkdir -p ${SIMULATIONDIR}
+  TIMINGS=${RESULTS}/timings
   SIMULATIONCLASS=GatlingSimulation
   CFG=${SIMULATIONDIR}/${SIMULATIONCLASS}.scala
-  replace_all ${TESTDIR}/configs/gatling.scala ${CFG}
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  SIMULATIONDIR_D=${CONFIGS_D}/Gatling_${STARTTIME}
+  CFG_D=${CONFIGS_D}/jmeter_${STARTTIME}.xml
+  replace_all ${CONFIGS}/gatling.scala ${CFG}
   JAVA_OPTS="-Dvus=${CONCURRENT} -Dduration=${DURATION} -Dtargetproto=${TARGETPROTO} -Dtargethost=${TARGETHOST} -Dtargetpath=${TARGETPATH}"
   echo "${TESTNAME}: Executing gatling ... "
-  _START=`date +%s.%N`
-  JAVA_OPTS=${JAVA_OPTS} ${TESTDIR}/gatling-charts-highcharts-bundle-2.2.2/bin/gatling.sh -sf ${SIMULATIONDIR} -s ${SIMULATIONCLASS} -rf ${RESULTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest -i -e "JAVA_OPTS=${JAVA_OPTS}" loadimpact/loadgentest:gatling -sf ${SIMULATIONDIR_D} -s ${SIMULATIONCLASS} -rf ${RESULTS_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Please open the following file: /loadgentests/results/161013-122223/gatling_static/gatlingsimulation-1476361428999/index.html
-  _SIMULATIONLOG=`grep "Please open the following file" ${RESULTS}/stdout.log |cut -d\: -f2- |awk '{print $1}' |sed 's/\/index.html//'`/simulation.log
+  _SIMULATIONLOG=${TESTDIR}/`grep "Please open the following file" ${RESULTS}/stdout.log |cut -d\: -f2- |awk '{print $1}' |sed 's/\/index.html//' |cut -c14-`/simulation.log
   #REQUEST	Scenario Name	5		request_1	1476361429927	1476361429947	OK
   #REQUEST	Scenario Name	6		request_1	1476361429929	1476361429956	OK
   #REQUEST	Scenario Name	2		request_1	1476361429914	1476361429932	OK
@@ -593,15 +678,22 @@ locust_scripting() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to things on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
   CFG=${TESTDIR}/configs/locust_${STARTTIME}.py
-  replace_all ${TESTDIR}/configs/locust.py ${CFG}
-  _START=`date +%s.%N`
-  echo "${TESTNAME}: Executing locust --host=\"${TARGETPROTO}://${TARGETHOST}\" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
-  locust --host="${TARGETPROTO}://${TARGETHOST}" --locustfile=${CFG} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  TIMINGS=${RESULTS}/timings
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  CFG_D=${CONFIGS_D}/locust_${STARTTIME}.py
+  replace_all ${CONFIGS}/locust.py ${CFG}
+  _START=`gettimestamp`
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:locust --host=\"${TARGETPROTO}://${TARGETHOST}\" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:locust --host="${TARGETPROTO}://${TARGETHOST}" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $2}'`
   _ERRORS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $3}' |cut -d\( -f1`
@@ -631,25 +723,33 @@ grinder_scripting() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
-  export RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
+  # Paths to things on host machine
+  RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  CFG=${TESTDIR}/configs/grinder_${STARTTIME}.py
-  replace_all ${TESTDIR}/configs/grinder.py ${CFG}
-  CFG2=${TESTDIR}/configs/grinder_${STARTTIME}.properties
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
+  TIMINGS=${RESULTS}/timings
+  CFG=${CONFIGS}/grinder_${STARTTIME}.py
+  CFG2=${CONFIGS}/grinder_${STARTTIME}.properties
   TMPCFG2=/tmp/grinder_${STARTTIME}.properties
-  cp ${TESTDIR}/configs/grinder.properties $TMPCFG2
+  # Paths to things in Docker instance
+  # export RESULTS_D as it is referenced in replace_all()
+  export RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  CFG2_D=${CONFIGS_D}/grinder_${STARTTIME}.properties
+  CFG_D=${CONFIGS_D}/grinder_${STARTTIME}.py
+  replace_all ${CONFIGS}/grinder.py ${CFG}
+  cp ${CONFIGS}/grinder.properties $TMPCFG2
   # Grinder specifies thread duration in ms
   _DURATION=`expr ${DURATION} \* 1000`
   replace $TMPCFG2 "DURATION" "${_DURATION}"
-  replace $TMPCFG2 "SCRIPT" "${CFG}"
+  replace $TMPCFG2 "SCRIPT" "${CFG_D}"
   replace_all $TMPCFG2 $CFG2
   rm $TMPCFG2
-  cd ${TESTDIR}/configs
-  echo "${TESTNAME}: Executing java net.grinder.Grinder ${CFG2} ... "
-  _START=`date +%s.%N`
-  CLASSPATH=/loadgentests/grinder-3.11/lib/grinder.jar java net.grinder.Grinder ${CFG2} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:grinder ${CFG2_D} ... "
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:grinder ${CFG2_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Grinder only logs durations for individual requests. I don't think there is any simple way of making it
   # output aggregated statistics to the console, so we have to first find out what our workers are called
@@ -688,15 +788,22 @@ wrk_scripting() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  # Paths to things on host machine
   RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  CFG=${TESTDIR}/configs/wrk_${STARTTIME}.lua
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
+  TIMINGS=${RESULTS}/timings
+  CFG=${CONFIGS}/wrk_${STARTTIME}.lua
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  CFG_D=${CONFIGS_D}/wrk_${STARTTIME}.lua
   replace_all ${TESTDIR}/configs/wrk.lua ${CFG}
-  echo "${TESTNAME}: Executing wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} ... "
-  _START=`date +%s.%N`
-  ${TESTDIR}/wrk/wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG_D} ${TARGETURL} ... "
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG_D} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _RPS=`grep '^Requests/sec:' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
   _RTTAVG=`grep -A 2 'Thread Stats' ${RESULTS}/stdout.log |grep 'Latency' |awk '{print $2}' |duration2ms |stripdecimals`
@@ -721,28 +828,50 @@ k6_scripting() {
   TESTNAME=${FUNCNAME[0]}
   echo ""
   echo "${TESTNAME}: starting at "`date +%y%m%d-%H:%M:%S`
+  # Paths to things on host machine
   RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
-  TIMINGS="${RESULTS}/timings"
-  CFG=${TESTDIR}/configs/k6_${STARTTIME}.js
-  replace_all ${TESTDIR}/configs/k6.js ${CFG}
-  echo "${TESTNAME}: Executing k6 run --vus ${CONCURRENT} --duration ${DURATION}s --out json=${RESULTS}/output.json ${CFG} ... "
-  _START=`date +%s.%N`
-  k6 run --vus ${CONCURRENT} --duration ${DURATION}s --out json=${RESULTS}/output.json ${CFG} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
-  _END=`date +%s.%N`
+  CONFIGS=${TESTDIR}/configs
+  mkdir -p ${CONFIGS}
+  TIMINGS=${RESULTS}/timings
+  CFG=${CONFIGS}/k6_${STARTTIME}.js
+  # Paths to things in Docker instance
+  RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
+  CONFIGS_D=/loadgentest/configs
+  CFG_D=${CONFIGS_D}/k6_${STARTTIME}.js
+  replace_all ${TCONFIGS}/k6.js ${CFG}
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} ... "
+  _START=`gettimestamp`
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  # XXX TODO: use JSON output instead
-  _REQUESTS=`grep "http_reqs..." ${RESULTS}/stdout.log |tail -1 |awk '{print $2}'`
-  _RPS=`grep "http_reqs..." ${RESULTS}/stdout.log |tail -1 |awk '{print $3}' |egrep -o '[0-9]*\.[0-9]*' |toint`
-  _RTTAVG=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'avg=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
-  _RTTMIN=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'min=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
-  _RTTMAX=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'max=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
-  _RTTp50=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'med=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
-  _RTTp75="-"
-  _RTTp90=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'p\(90\)=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
-  _RTTp95=`grep "http_req_duration" ${RESULTS}/stdout.log |tail -1 |egrep -o 'p\(95\)=.*' |awk '{print $1}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
-  _RTTp99="-"
+  # Would be nice to use JSON output here, but the JSON file can be big (and possibly impact performance while it is being written)
+  # which means jq takes forever to parse it, so we parse stdout output instead. This, however, will currently fail for sub-millisecond
+  # response times because k6 reports times in microseconds then and uses the greek character "my" to signify "micro".
+  #jq -c 'select(.type == "Point") | select(.metric == "http_req_duration") | .data.value' ${RESULTS}/output.json >${TMPTIMINGS}
+  #_REQUESTS=`wc -l ${TMPTIMINGS} |awk '{print $1}'`
+  #_RPS=`echo "scale=0; ${_REQUESTS}/${DURATION};" |bc`
+  #_OKREQUESTS=`jq -c 'select(.type == "Point") | select(.metric == "http_req_duration") | select(.data.tags.status == "200")' |wc -l | awk '{print $1}'`
+  #_ERRORS=`expr ${_REQUESTS} - ${_OKREQUESTS}`
+  #_RTTAVG=`awk 'BEGIN{num=0;tot=0}{num=num+1;tot=tot+$1}END{print tot/num}' ${TMPTIMINGS} |stripdecimals`
+  #_RTTMIN=`cat ${TMPTIMINGS} |sort -n |head -1 |awk '{print $1}'`
+  #_RTTMAX=`cat ${TMPTIMINGS} |sort -n |tail -1 |awk '{print $1}'`
+  #_RTTp50=`cat ${TMPTIMINGS} |percentile 50`
+  #_RTTp75=`cat ${TMPTIMINGS} |percentile 75`
+  #_RTTp90=`cat ${TMPTIMINGS} |percentile 90`
+  #_RTTp95=`cat ${TMPTIMINGS} |percentile 95`
+  #_RTTp99=`cat ${TMPTIMINGS} |percentile 99`
+  _REQUESTS=`grep "http_reqs" ${RESULTS}/stdout.log |awk '{print $2}'`
+  _RPS=`grep "http_reqs" ${RESULTS}/stdout.log |awk '{print $3}' |egrep -o '[0-9]*\.[0-9]*' |toint`
   _ERRORS="-"
+  _RTTp75="-"
+  _RTTp99="-"
+  _RTTAVG=`grep "http_req_duration" ${RESULTS}/stdout.log |awk '{print $2}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTMAX=`grep "http_req_duration" ${RESULTS}/stdout.log |awk '{print $3}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTp50=`grep "http_req_duration" ${RESULTS}/stdout.log |awk '{print $4}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTMIN=`grep "http_req_duration" ${RESULTS}/stdout.log |awk '{print $5}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTp90=`grep "http_req_duration" ${RESULTS}/stdout.log |awk '{print $6}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
+  _RTTp95=`grep "http_req_duration" ${RESULTS}/stdout.log |awk '{print $7}' |awk -F\= '{print $2}' |duration2ms |stripdecimals`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
@@ -754,7 +883,7 @@ k6_scripting() {
 
 staticurltests() {
   apachebench_static
-  boom_static
+  hey_static
   wrk_static
   artillery_static
   vegeta_static
@@ -765,7 +894,7 @@ staticurltests() {
   # Concat all timing files
   LOGDIR=${TESTDIR}/results/${STARTTIME}
   cat ${LOGDIR}/apachebench_static/timings \
-      ${LOGDIR}/boom_static/timings \
+      ${LOGDIR}/hey_static/timings \
       ${LOGDIR}/wrk_static/timings \
       ${LOGDIR}/artillery_static/timings \
       ${LOGDIR}/vegeta_static/timings \
@@ -822,7 +951,7 @@ do
   export_testvars
   echo ""
   echo "################################################"
-  echo "#  Load Impact load generator test suite V1.1  #"
+  echo "#  Load Impact load generator test suite V2.0  #"
   echo "################################################"
   echo ""
   echo "1. Choose target URL (current: ${TARGETURL})"
@@ -845,7 +974,7 @@ do
   echo ""
   echo "a. Run Apachebench static-URL test"
   echo "b. Run Wrk static-URL test"
-  echo "c. Run Boom static-URL test"
+  echo "c. Run Hey static-URL test"
   echo "d. Run Artillery static-URL test"
   echo "e. Run Vegeta static-URL test"
   echo "f. Run Siege static-URL test"
@@ -902,7 +1031,7 @@ do
       [ "${TARGETURL}x" != "x" ] && wrk_static
       ;;
     c)
-      [ "${TARGETURL}x" != "x" ] && boom_static
+      [ "${TARGETURL}x" != "x" ] && hey_static
       ;;
     d)
       [ "${TARGETURL}x" != "x" ] && artillery_static
@@ -935,19 +1064,23 @@ do
       [ "${TARGETURL}x" != "x" ] && k6_scripting
       ;;
     R)
-      echo -n "Enter extra network delay to add (ms) : "
-      read ans
-      if [ "${NETWORK_DELAY}x" = "0x" ] ; then
-        echo "tc qdisc add dev eth0 root netem delay ${ans}ms"
-        tc qdisc add dev eth0 root netem delay ${ans}ms
+      if [ -z $NO_TC ]; then
+        echo -n "Enter extra network delay to add (ms) : "
+        read ans
+        if [ "${NETWORK_DELAY}x" = "0x" ] ; then
+          echo "tc qdisc add dev eth0 root netem delay ${ans}ms"
+          tc qdisc add dev eth0 root netem delay ${ans}ms
+        else
+          echo "tc qdisc change dev eth0 root netem delay ${ans}ms"
+          tc qdisc change dev eth0 root netem delay ${ans}ms
+        fi
+        if [ $? -ne 0 ] ; then 
+          echo "Failed to set network delay. Try running docker image with --cap-add=NET_ADMIN"
+        else
+          export NETWORK_DELAY=$ans
+        fi
       else
-        echo "tc qdisc change dev eth0 root netem delay ${ans}ms"
-        tc qdisc change dev eth0 root netem delay ${ans}ms
-      fi
-      if [ $? -ne 0 ] ; then 
-        echo "Failed to set network delay. Try running docker image with --cap-add=NET_ADMIN"
-      else
-        export NETWORK_DELAY=$ans
+        echo "There is no netem on this machine, so we can't simulate network delay. Sorry."
       fi
       ;;
     P)

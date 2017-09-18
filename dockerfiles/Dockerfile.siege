@@ -1,23 +1,12 @@
-FROM alpine:latest
+FROM jstarcher/siege
 
-RUN apk add --update --no-cache \
-	alpine-sdk \
-	libgcc \
-	linux-headers \
-        openssl-dev \
-        autoconf \
-        automake
+#
+# Note that this Siege has no HTTPS functionality
+#
 
-RUN cd /tmp                                           && \
-    git clone https://github.com/JoeDog/siege         && \
-    cd siege                                          && \
-    ./utils/bootstrap                                 && \
-    ./configure                                       && \
-    sed -i '1i#include\ \<sys\/types\.h\>' src/hash.c && \
-    sed -i 's/PAGESIZE/SZ_PAGESIZE/g' src/page.c      && \
-    make install                                      && \
-    apk del --purge alpine-sdk
+# Siege refuses to change log path when using -l flag, and insists on
+# creating a logfile in /usr/local/var/log, of all places...
+RUN mkdir -p /usr/local/var/log
 
-RUN mkdir -p /usr/local/var
-
-ENTRYPOINT ["/usr/local/bin/siege"]
+ENTRYPOINT ["/usr/bin/siege"]
+CMD ["--help"]
