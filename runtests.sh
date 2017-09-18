@@ -839,7 +839,7 @@ k6_scripting() {
   RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
   CONFIGS_D=/loadgentest/configs
   CFG_D=${CONFIGS_D}/k6_${STARTTIME}.js
-  replace_all ${TCONFIGS}/k6.js ${CFG}
+  replace_all ${CONFIGS}/k6.js ${CFG}
   echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} ... "
   _START=`gettimestamp`
   docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
