@@ -64,10 +64,18 @@ checkfor column || exit 1
 checkfor docker || exit 1
 
 # Default settings
-export TARGETURL=""
-export CONCURRENT=20
-export REQUESTS=1000
-export DURATION=10
+if [ -z $TARGETURL ]; then
+  export TARGETURL=""
+fi
+if [ -z $CONCURRENT ]; then
+  export CONCURRENT=20
+fi
+if [ -z $REQUESTS ]; then
+  export REQUESTS=1000
+fi
+if [ -z $DURATION ]; then
+  export DURATION=10
+fi
 export NETWORK_DELAY=0
 
 # Check which OS we're on
@@ -118,6 +126,18 @@ replace_all() {
   replace $DEST "TARGETBASEURL" "${TARGETBASEURL}"
   replace $DEST "LOGDIR" "${RESULTS_D}"
   replace $DEST "TSUNG_MAXUSERS" "${TSUNG_MU}"
+}
+
+# round down to nearest integer
+toint() {
+  read X
+  echo "scale=0; ${X}/1" |bc
+}
+
+# Take a decimal or integer number and strip it to at most 2-digit precision
+stripdecimals() {
+  X=`egrep -o '^[0-9]*\.?[0-9]?[0-9]?' |awk 'NR==1{print $1}'`
+  echo "if (${X}>0 && ${X}<1) print 0; ${X}" |bc
 }
 
 # utility func to interpret "Xs", "Xms", "Xus", "Xns" durations and translate them to ms
@@ -206,18 +226,6 @@ report() {
         if ($12=="-")printf "- "; else printf "rtt95="$12" "; \
         if ($13=="-")print "-"; else print "rtt99="$13}' $1
     fi ) |column -t
-}
-
-# Take a decimal or integer number and strip it to at most 2-digit precision
-stripdecimals() {
-  X=`egrep -o '^[0-9]*\.?[0-9]?[0-9]?' |awk 'NR==1{print $1}'`
-  echo "if (${X}>0 && ${X}<1) print 0; ${X}" |bc
-}
-
-# round down to nearest integer
-toint() {
-  read X
-  echo "scale=0; ${X}/1" |bc
 }
 
 gettimestamp() {
@@ -370,39 +378,30 @@ artillery_static() {
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _TMPDATA=${RESULTS}/transaction_log
-  jq -c '.intermediate[0].latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
-  echo CP1
+  jq -c '.intermediate[] |.latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
   _REQUESTS=`wc -l ${_TMPDATA} |awk '{print $1}'`
-  echo CP2
-  _START_TS=`head -1 ${_TMPDATA} |awk -F: '{print $4}' |cut -c1-13`
-  echo CP3
-  _END_TS=`tail -1 ${_TMPDATA} |awk -F: '{print $4}' |cut -c1-13`
-  echo CP4
+  _START_TS=`head -1 ${_TMPDATA} |egrep -o '"ts":[0-9]*' |awk -F: '{print $2}'`
+  _END_TS=`tail -1 ${_TMPDATA} |egrep -o '"ts":[0-9]*' |awk -F: '{print $2}'`
   _DURATION_MS=`echo "${_END_TS}-${_START_TS}" |bc`
-  echo CP5
   _RPS=`echo "scale=0; (${_REQUESTS}*1000)/${_DURATION_MS}" |bc`
-  echo CP6
   _OKNUM=`grep '"code":200' ${_TMPDATA} |wc -l |awk '{print $1}'`
-  echo CP7
-  _OKRTTTOT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |paste -sd+ - |bc -l`
-  echo CP8
-  _RTTAVGUS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l |toint`
-  echo CP9
+  _OKRTTTOTUS=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*' |awk -F: '{print int($2/1000)}' |paste -sd+ - |bc -l`
+  _RTTAVGUS=`echo "${_OKRTTTOTUS}/${_OKNUM}" |bc -l |toint`
   _RTTAVG=`echo "${_RTTAVGUS}us" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
-  _RTTMINUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |sort -n |head -1`
+  _RTTMINUS=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |sort -n |head -1`
   _RTTMIN=`echo "${_RTTMINUS}us" |duration2ms`
-  _RTTMAXUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |sort -n |tail -1`
+  _RTTMAXUS=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |sort -n |tail -1`
   _RTTMAX=`echo "${_RTTMAXUS}us" |duration2ms`
-  _RTTp50US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 50`
+  _RTTp50US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 50`
   _RTTp50=`echo "${_RTTp50US}us" |duration2ms`
-  _RTTp75US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 75`
+  _RTTp75US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 75`
   _RTTp75=`echo "${_RTTp75US}us" |duration2ms`
-  _RTTp90US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 90`
+  _RTTp90US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 90`
   _RTTp90=`echo "${_RTTp90US}us" |duration2ms`
-  _RTTp95US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 95`
+  _RTTp95US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 95`
   _RTTp95=`echo "${_RTTp95US}us" |duration2ms`
-  _RTTp99US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 99`
+  _RTTp99US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 99`
   _RTTp99=`echo "${_RTTp99US}us" |duration2ms`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
