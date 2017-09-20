@@ -263,9 +263,9 @@ apachebench_static() {
   # Paths to results in Docker instance
   RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
   PERCENTAGES_D=${RESULTS_D}/percentages
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:ab -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:ab -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   echo "${_END} - ${_START}" |bc
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
@@ -372,6 +372,8 @@ artillery_static() {
   CONFIGS_D=/loadgentest/configs
   CFG_D=${CONFIGS_D}/artillery_${STARTTIME}.json
   replace_all ${CONFIGS}/artillery.json ${CFG}
+  # artillery writes its report to disk after the test has finished, which means performance during the
+  # test should not be affected
   echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D}"
   _START=`gettimestamp`
   docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
@@ -531,6 +533,9 @@ tsung_static() {
   CONFIGS_D=/loadgentest/configs
   CFG_D=${CONFIGS_D}/tsung_${STARTTIME}.xml
   replace_all ${CONFIGS}/tsung.xml ${CFG}
+  # Hard to get good stats from Tsung unless we make it log each transaction, but the transaction log format
+  # is pretty compact, with maybe 80 characters / transaction, so a test with a million or so requests
+  # should not incur a large overhead for transaction log writing
   echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start ... "
   _START=`gettimestamp`
   docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
@@ -587,6 +592,8 @@ jmeter_static() {
   #
   # useNanoTime=true doesn't seem to work. I'm probably doing something wrong.
   #
+  # Like Tsung, the Jmeter transaction log is in a compact CSV format that should not affect RPS
+  # numbers too much
   echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true ... "
   _START=`gettimestamp`
   docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
@@ -600,15 +607,15 @@ jmeter_static() {
   _ENDMS=`tail -1 ${TXLOG} |cut -c1-13`
   _REQUESTS=`awk 'END{print NR-1}' ${TXLOG}`
   _RPS=`echo "(${_REQUESTS}*1000)/(${_ENDMS}-${_STARTMS})" |bc`
-  _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$13}END{printf "%.2f", tot/num}' ${TXLOG}`
-  _RTTMIN=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | head -1`
-  _RTTMAX=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | tail -1`
+  _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$14}END{printf "%.2f", tot/num}' ${TXLOG}`
+  _RTTMIN=`awk -F\, 'NR>1{print $14}' ${TXLOG} |sort -n | head -1`
+  _RTTMAX=`awk -F\, 'NR>1{print $14}' ${TXLOG} |sort -n | tail -1`
   _ERRORS=`awk -F\, 'NR>1&&($4<200||$4>=400){print $0}' ${TXLOG} |wc -l |awk '{print $1}'`
-  _RTTp50=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 50`
-  _RTTp75=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 75`
-  _RTTp90=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 90`
-  _RTTp95=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 95`
-  _RTTp99=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 99`
+  _RTTp50=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 50`
+  _RTTp75=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 75`
+  _RTTp90=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 90`
+  _RTTp95=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 95`
+  _RTTp99=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 99`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
