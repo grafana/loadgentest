@@ -55,7 +55,7 @@ RUN go get -u github.com/tsenart/vegeta
 RUN go get -u github.com/loadimpact/k6
 
 # Install Apachebench (>=2.3)
-RUN apt-get -y install apache2-utils
+#RUN apt-get -y install apache2-utils
 # How install specific version of ab?
 
 # Get and compile Siege (latest snapshot)

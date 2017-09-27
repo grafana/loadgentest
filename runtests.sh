@@ -64,10 +64,18 @@ checkfor column || exit 1
 checkfor docker || exit 1
 
 # Default settings
-export TARGETURL=""
-export CONCURRENT=20
-export REQUESTS=1000
-export DURATION=10
+if [ -z $TARGETURL ]; then
+  export TARGETURL=""
+fi
+if [ -z $CONCURRENT ]; then
+  export CONCURRENT=20
+fi
+if [ -z $REQUESTS ]; then
+  export REQUESTS=1000
+fi
+if [ -z $DURATION ]; then
+  export DURATION=10
+fi
 export NETWORK_DELAY=0
 
 # Check which OS we're on
@@ -118,6 +126,18 @@ replace_all() {
   replace $DEST "TARGETBASEURL" "${TARGETBASEURL}"
   replace $DEST "LOGDIR" "${RESULTS_D}"
   replace $DEST "TSUNG_MAXUSERS" "${TSUNG_MU}"
+}
+
+# round down to nearest integer
+toint() {
+  read X
+  echo "scale=0; ${X}/1" |bc
+}
+
+# Take a decimal or integer number and strip it to at most 2-digit precision
+stripdecimals() {
+  X=`egrep -o '^[0-9]*\.?[0-9]?[0-9]?' |awk 'NR==1{print $1}'`
+  echo "if (${X}>0 && ${X}<1) print 0; ${X}" |bc
 }
 
 # utility func to interpret "Xs", "Xms", "Xus", "Xns" durations and translate them to ms
@@ -208,18 +228,6 @@ report() {
     fi ) |column -t
 }
 
-# Take a decimal or integer number and strip it to at most 2-digit precision
-stripdecimals() {
-  X=`egrep -o '^[0-9]*\.?[0-9]?[0-9]?' |awk 'NR==1{print $1}'`
-  echo "if (${X}>0 && ${X}<1) print 0; ${X}" |bc
-}
-
-# round down to nearest integer
-toint() {
-  read X
-  echo "scale=0; ${X}/1" |bc
-}
-
 gettimestamp() {
   if [ "${OS}x" = "Darwinx" ]; then
       # Seconds since epoch, with nanosecond resolution, for MacOS
@@ -255,9 +263,9 @@ apachebench_static() {
   # Paths to results in Docker instance
   RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
   PERCENTAGES_D=${RESULTS_D}/percentages
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:ab -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:ab -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   echo "${_END} - ${_START}" |bc
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
@@ -364,45 +372,38 @@ artillery_static() {
   CONFIGS_D=/loadgentest/configs
   CFG_D=${CONFIGS_D}/artillery_${STARTTIME}.json
   replace_all ${CONFIGS}/artillery.json ${CFG}
+  # artillery writes its report to disk after the test has finished, which means performance during the
+  # test should not be affected
   echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D}"
   _START=`gettimestamp`
   docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _TMPDATA=${RESULTS}/transaction_log
-  jq -c '.intermediate[0].latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
-  echo CP1
+  jq -c '.intermediate[] |.latencies[] |{rtt:.[2],code:.[3],ts:.[0]}' ${RESULTS}/artillery_report.json >${_TMPDATA}
   _REQUESTS=`wc -l ${_TMPDATA} |awk '{print $1}'`
-  echo CP2
-  _START_TS=`head -1 ${_TMPDATA} |awk -F: '{print $4}' |cut -c1-13`
-  echo CP3
-  _END_TS=`tail -1 ${_TMPDATA} |awk -F: '{print $4}' |cut -c1-13`
-  echo CP4
+  _START_TS=`head -1 ${_TMPDATA} |egrep -o '"ts":[0-9]*' |awk -F: '{print $2}'`
+  _END_TS=`tail -1 ${_TMPDATA} |egrep -o '"ts":[0-9]*' |awk -F: '{print $2}'`
   _DURATION_MS=`echo "${_END_TS}-${_START_TS}" |bc`
-  echo CP5
   _RPS=`echo "scale=0; (${_REQUESTS}*1000)/${_DURATION_MS}" |bc`
-  echo CP6
   _OKNUM=`grep '"code":200' ${_TMPDATA} |wc -l |awk '{print $1}'`
-  echo CP7
-  _OKRTTTOT=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |paste -sd+ - |bc -l`
-  echo CP8
-  _RTTAVGUS=`echo "${_OKRTTTOT}/${_OKNUM}" |bc -l |toint`
-  echo CP9
+  _OKRTTTOTUS=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*' |awk -F: '{print int($2/1000)}' |paste -sd+ - |bc -l`
+  _RTTAVGUS=`echo "${_OKRTTTOTUS}/${_OKNUM}" |bc -l |toint`
   _RTTAVG=`echo "${_RTTAVGUS}us" |duration2ms`
   _ERRORS=`expr ${_REQUESTS} - ${_OKNUM}`
-  _RTTMINUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |sort -n |head -1`
+  _RTTMINUS=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |sort -n |head -1`
   _RTTMIN=`echo "${_RTTMINUS}us" |duration2ms`
-  _RTTMAXUS=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |sort -n |tail -1`
+  _RTTMAXUS=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |sort -n |tail -1`
   _RTTMAX=`echo "${_RTTMAXUS}us" |duration2ms`
-  _RTTp50US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 50`
+  _RTTp50US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 50`
   _RTTp50=`echo "${_RTTp50US}us" |duration2ms`
-  _RTTp75US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 75`
+  _RTTp75US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 75`
   _RTTp75=`echo "${_RTTp75US}us" |duration2ms`
-  _RTTp90US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 90`
+  _RTTp90US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 90`
   _RTTp90=`echo "${_RTTp90US}us" |duration2ms`
-  _RTTp95US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 95`
+  _RTTp95US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 95`
   _RTTp95=`echo "${_RTTp95US}us" |duration2ms`
-  _RTTp99US=`grep 'code\":200' ${_TMPDATA} |awk -F: '{print $2}' |awk -F\, '{print int($1/1000)}' |percentile 99`
+  _RTTp99US=`grep '"code":200' ${_TMPDATA} |egrep -o '"rtt":[0-9]*\.?[0-9]*[eE]?\+?[0-9]*' |awk -F: '{print int($2/1000)}' |percentile 99`
   _RTTp99=`echo "${_RTTp99US}us" |duration2ms`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
@@ -475,10 +476,11 @@ siege_static() {
   RESULTS=${TESTDIR}/results/${STARTTIME}/${TESTNAME}
   mkdir -p ${RESULTS}
   TIMINGS=${RESULTS}/timings
+  CONFIGS_D=/loadgentest/configs
   # We don't need paths in the Docker instance as it seems more or less impossible
   # to get Siege to create a logfile. At the very least it seems to blatantly ignore
   # the -l flag.
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -c ${CONCURRENT} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -c ${CONCURRENT} -R ${SIEGERC_D} ${TARGETURL} ... "
   _START=`gettimestamp`
   # -q flag now (since Siege v4?) suppresses ALL useful output to stdout and stderr (but retains some three lines of
   # useless text? - e.g. "The server is now under siege..." - sent to stderr). This means we can't use -q 
@@ -487,7 +489,12 @@ siege_static() {
   # per-request statistics output. We don't know if output from the Docker instance sent stdout on the host machine 
   # could become a bottleneck here, so to be on the safe side we disable stdout output to the user and just store
   # it in a file, for later processing.
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -c ${CONCURRENT} ${TARGETURL} > ${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
+  # Siege also seems to have a built-in limit that says it will simulate
+  # 255 VUs tops, which is a bit low. We'll up it. Note though that Siege
+  # becomes progressively more unstable when simulating more VUs. At least
+  # in earlier versions, going over 500 VUs would make it core dump regularly.
+  SIEGERC_D=${CONFIGS_D}/siegerc
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -R ${SIEGERC_D} -c ${CONCURRENT} ${TARGETURL} > ${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`
@@ -532,6 +539,9 @@ tsung_static() {
   CONFIGS_D=/loadgentest/configs
   CFG_D=${CONFIGS_D}/tsung_${STARTTIME}.xml
   replace_all ${CONFIGS}/tsung.xml ${CFG}
+  # Hard to get good stats from Tsung unless we make it log each transaction, but the transaction log format
+  # is pretty compact, with maybe 80 characters / transaction, so a test with a million or so requests
+  # should not incur a large overhead for transaction log writing
   echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start ... "
   _START=`gettimestamp`
   docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
@@ -588,6 +598,8 @@ jmeter_static() {
   #
   # useNanoTime=true doesn't seem to work. I'm probably doing something wrong.
   #
+  # Like Tsung, the Jmeter transaction log is in a compact CSV format that should not affect RPS
+  # numbers too much
   echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true ... "
   _START=`gettimestamp`
   docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
@@ -601,15 +613,15 @@ jmeter_static() {
   _ENDMS=`tail -1 ${TXLOG} |cut -c1-13`
   _REQUESTS=`awk 'END{print NR-1}' ${TXLOG}`
   _RPS=`echo "(${_REQUESTS}*1000)/(${_ENDMS}-${_STARTMS})" |bc`
-  _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$13}END{printf "%.2f", tot/num}' ${TXLOG}`
-  _RTTMIN=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | head -1`
-  _RTTMAX=`awk -F\, 'NR>1{print $13}' ${TXLOG} |sort -n | tail -1`
+  _RTTAVG=`awk -F\, 'BEGIN{tot=0;num=0;}NR>1{num=num+1;tot=tot+$14}END{printf "%.2f", tot/num}' ${TXLOG}`
+  _RTTMIN=`awk -F\, 'NR>1{print $14}' ${TXLOG} |sort -n | head -1`
+  _RTTMAX=`awk -F\, 'NR>1{print $14}' ${TXLOG} |sort -n | tail -1`
   _ERRORS=`awk -F\, 'NR>1&&($4<200||$4>=400){print $0}' ${TXLOG} |wc -l |awk '{print $1}'`
-  _RTTp50=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 50`
-  _RTTp75=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 75`
-  _RTTp90=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 90`
-  _RTTp95=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 95`
-  _RTTp99=`awk -F\, 'NR>1{print $13}' ${TXLOG} |percentile 99`
+  _RTTp50=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 50`
+  _RTTp75=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 75`
+  _RTTp90=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 90`
+  _RTTp95=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 95`
+  _RTTp99=`awk -F\, 'NR>1{print $14}' ${TXLOG} |percentile 99`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"

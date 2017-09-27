@@ -1,0 +1,13 @@
+docker run -it --rm -v `pwd`:/opt/gatling/conf -v `pwd`:/opt/gatling/user-files -v `pwd`:/opt/gatling/results denvazh/gatling -sf /opt/gatling/conf -s GatlingSimulation
+
+# artillery not working on snik1
+git clone https://github.com/shoreditch-ops/artillery-docker
+cd <x>
+docker build -t artillery .
+docker run -i artillery dino
+
+
+
+
+
+
