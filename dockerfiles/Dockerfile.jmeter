@@ -1,11 +1,11 @@
 FROM java:8-jdk-alpine
 
-ENV JMETER_VERSION 3.2
+ENV JMETER_VERSION 3.3
 
 RUN apk --update --no-cache add \
 	wget
 
 RUN cd /bin && \
-    wget -O - 'http://apache.mirrors.spacedump.net//jmeter/binaries/apache-jmeter-'${JMETER_VERSION}'.tgz' |tar -zxf -
+    wget -O - 'http://apache.mirrors.spacedump.net/jmeter/binaries/apache-jmeter-'${JMETER_VERSION}'.tgz' |tar -zxf -
 
 ENV PATH "/bin/apache-jmeter-${JMETER_VERSION}/bin:${PATH}"

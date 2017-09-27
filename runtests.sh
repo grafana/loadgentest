@@ -263,9 +263,9 @@ apachebench_static() {
   # Paths to results in Docker instance
   RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
   PERCENTAGES_D=${RESULTS_D}/percentages
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-apachebench -k -e ${PERCENTAGES_D} -t ${DURATION} -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   echo "${_END} - ${_START}" |bc
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
@@ -300,9 +300,9 @@ wrk_static() {
   RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
   # Note that we supply TARGETURL on the cmd line as wrk requires that, but the cmd line parameter will
   # not be used as our script decides what URL to load (which will of course be the same TARGETURL though)
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END} - ${_START}" |bc |stripdecimals`
   _RPS=`grep '^Requests/sec:' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
@@ -334,8 +334,8 @@ hey_static() {
   TIMINGS=${RESULTS}/timings
   # Paths to results in Docker instance
   RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:hey -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
-  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:hey -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-hey -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} ... "
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-hey -n ${REQUESTS} -c ${CONCURRENT} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _RPS=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Requests/sec:' |awk '{print $2}' |toint`
   _DURATION=`grep -A 5 '^Summary:' ${RESULTS}/stdout.log |grep 'Total:' |awk '{print $2}' |stripdecimals`
   _REQUESTS=`grep '\[200\]' ${RESULTS}/stdout.log |grep ' responses' |awk '{print $2}'`
@@ -374,9 +374,9 @@ artillery_static() {
   replace_all ${CONFIGS}/artillery.json ${CFG}
   # artillery writes its report to disk after the test has finished, which means performance during the
   # test should not be affected
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D}"
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D}"
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest:artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest loadimpact/loadgentest-artillery run -o ${RESULTS_D}/artillery_report.json ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _TMPDATA=${RESULTS}/transaction_log
@@ -424,9 +424,9 @@ vegeta_static() {
   # Paths to things in Docker instance
   RESULTS_D=/loadgentest/results/${STARTTIME}/${TESTNAME}
   # Vegeta only supports static request rates. You might want to change the REQUESTS parameter until you get the highest throughput w/o errors.
-  echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" | docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
+  echo "${TESTNAME}: Executing echo \"GET ${TARGETURL}\" | docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s ... "
   _START=`gettimestamp`
-  echo "GET ${TARGETURL}" |docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s >${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
+  echo "GET ${TARGETURL}" |docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-vegeta attack -rate=${RATE} -connections=${CONCURRENT} -duration=${DURATION}s >${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   #
@@ -443,7 +443,7 @@ vegeta_static() {
   # (note that Vegeta inserts no CSV header in the CSV dump; the first line is the first data point)
   #
   _CSV=${RESULTS}/vegeta_dump.csv
-  docker run -i loadimpact/loadgentest:vegeta dump -dumper csv <${RESULTS}/stdout.log >${_CSV}
+  docker run -i loadimpact/loadgentest-vegeta dump -dumper csv <${RESULTS}/stdout.log >${_CSV}
   _REQUESTS=`awk 'END{print NR}' ${_CSV}`
   _STARTNS=`head -1 ${_CSV} |awk -F\, '{print $1}'`
   _ENDNS=`tail -1 ${_CSV} |awk -F\, '{print $1}'`
@@ -477,10 +477,11 @@ siege_static() {
   mkdir -p ${RESULTS}
   TIMINGS=${RESULTS}/timings
   CONFIGS_D=/loadgentest/configs
+  SIEGERC_D=${CONFIGS_D}/siegerc
   # We don't need paths in the Docker instance as it seems more or less impossible
   # to get Siege to create a logfile. At the very least it seems to blatantly ignore
   # the -l flag.
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -c ${CONCURRENT} -R ${SIEGERC_D} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-siege -b -t ${DURATION}S -c ${CONCURRENT} -R ${SIEGERC_D} ${TARGETURL} ... "
   _START=`gettimestamp`
   # -q flag now (since Siege v4?) suppresses ALL useful output to stdout and stderr (but retains some three lines of
   # useless text? - e.g. "The server is now under siege..." - sent to stderr). This means we can't use -q 
@@ -493,8 +494,7 @@ siege_static() {
   # 255 VUs tops, which is a bit low. We'll up it. Note though that Siege
   # becomes progressively more unstable when simulating more VUs. At least
   # in earlier versions, going over 500 VUs would make it core dump regularly.
-  SIEGERC_D=${CONFIGS_D}/siegerc
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:siege -b -t ${DURATION}S -R ${SIEGERC_D} -c ${CONCURRENT} ${TARGETURL} > ${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-siege -b -t ${DURATION}S -R ${SIEGERC_D} -c ${CONCURRENT} ${TARGETURL} > ${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`
@@ -542,9 +542,9 @@ tsung_static() {
   # Hard to get good stats from Tsung unless we make it log each transaction, but the transaction log format
   # is pretty compact, with maybe 80 characters / transaction, so a test with a million or so requests
   # should not incur a large overhead for transaction log writing
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-tsung -l ${RESULTS_D} -f ${CFG_D} start ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:tsung -l ${RESULTS_D} -f ${CFG_D} start > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-tsung -l ${RESULTS_D} -f ${CFG_D} start > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _LOGDIR="${RESULTS}/"`grep '^Log directory is:' ${RESULTS}/stdout.log |awk '{print $4}' |awk -F\/ '{print $NF}'`
@@ -600,9 +600,9 @@ jmeter_static() {
   #
   # Like Tsung, the Jmeter transaction log is in a compact CSV format that should not affect RPS
   # numbers too much
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-jmeter jmeter -n -t ${CFG_D} -j ${JMETERLOG_D} -l ${TXLOG_D} -D sampleresult.useNanoTime=true > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # TXLOG:
@@ -653,7 +653,7 @@ gatling_static() {
   JAVA_OPTS="-Dvus=${CONCURRENT} -Dduration=${DURATION} -Dtargetproto=${TARGETPROTO} -Dtargethost=${TARGETHOST} -Dtargetpath=${TARGETPATH}"
   echo "${TESTNAME}: Executing gatling ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest -i -e "JAVA_OPTS=${JAVA_OPTS}" loadimpact/loadgentest:gatling -sf ${SIMULATIONDIR_D} -s ${SIMULATIONCLASS} -rf ${RESULTS_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i -e "JAVA_OPTS=${JAVA_OPTS}" loadimpact/loadgentest-gatling -sf ${SIMULATIONDIR_D} -s ${SIMULATIONCLASS} -rf ${RESULTS_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Please open the following file: /loadgentests/results/161013-122223/gatling_static/gatlingsimulation-1476361428999/index.html
@@ -703,8 +703,8 @@ locust_scripting() {
   CFG_D=${CONFIGS_D}/locust_${STARTTIME}.py
   replace_all ${CONFIGS}/locust.py ${CFG}
   _START=`gettimestamp`
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:locust --host=\"${TARGETPROTO}://${TARGETHOST}\" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:locust --host="${TARGETPROTO}://${TARGETHOST}" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-locust --host=\"${TARGETPROTO}://${TARGETHOST}\" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-locust --host="${TARGETPROTO}://${TARGETHOST}" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $2}'`
@@ -758,9 +758,9 @@ grinder_scripting() {
   replace $TMPCFG2 "SCRIPT" "${CFG_D}"
   replace_all $TMPCFG2 $CFG2
   rm $TMPCFG2
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:grinder ${CFG2_D} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-grinder ${CFG2_D} ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:grinder ${CFG2_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-grinder ${CFG2_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Grinder only logs durations for individual requests. I don't think there is any simple way of making it
@@ -812,9 +812,9 @@ wrk_scripting() {
   CONFIGS_D=/loadgentest/configs
   CFG_D=${CONFIGS_D}/wrk_${STARTTIME}.lua
   replace_all ${TESTDIR}/configs/wrk.lua ${CFG}
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG_D} ${TARGETURL} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG_D} ${TARGETURL} ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG_D} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-wrk -c ${CONCURRENT} -t ${CONCURRENT} -d ${DURATION} --latency --script ${CFG_D} ${TARGETURL} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _RPS=`grep '^Requests/sec:' ${RESULTS}/stdout.log |awk '{print $2}' |toint`
@@ -852,9 +852,9 @@ k6_scripting() {
   CONFIGS_D=/loadgentest/configs
   CFG_D=${CONFIGS_D}/k6_${STARTTIME}.js
   replace_all ${CONFIGS}/k6.js ${CFG}
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} ... "
   _START=`gettimestamp`
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest:k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-k6 run --vus ${CONCURRENT} --duration ${DURATION}s ${CFG_D} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   # Would be nice to use JSON output here, but the JSON file can be big (and possibly impact performance while it is being written)
