@@ -65,7 +65,7 @@ checkfor docker || exit 1
 
 # Default settings
 if [ -z $TARGETURL ]; then
-  export TARGETURL=""
+  export TARGETURL="http://test.loadimpact.com/"
 fi
 if [ -z $CONCURRENT ]; then
   export CONCURRENT=20
@@ -443,7 +443,7 @@ vegeta_static() {
   # (note that Vegeta inserts no CSV header in the CSV dump; the first line is the first data point)
   #
   _CSV=${RESULTS}/vegeta_dump.csv
-  docker run -i loadimpact/loadgentest-vegeta dump -dumper csv <${RESULTS}/stdout.log >${_CSV}
+  docker run -i loadimpact/loadgentest-vegeta encode -to csv <${RESULTS}/stdout.log >${_CSV}
   _REQUESTS=`awk 'END{print NR}' ${_CSV}`
   _STARTNS=`head -1 ${_CSV} |awk -F\, '{print $1}'`
   _ENDNS=`tail -1 ${_CSV} |awk -F\, '{print $1}'`
@@ -494,7 +494,7 @@ siege_static() {
   # 255 VUs tops, which is a bit low. We'll up it. Note though that Siege
   # becomes progressively more unstable when simulating more VUs. At least
   # in earlier versions, going over 500 VUs would make it core dump regularly.
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-siege -b -t ${DURATION}S -R ${SIEGERC_D} -c ${CONCURRENT} ${TARGETURL} > ${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
+  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-siege -b -t ${DURATION}S -c ${CONCURRENT} ${TARGETURL} > ${RESULTS}/stdout.log 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
   _REQUESTS=`grep '^Transactions:' ${RESULTS}/stderr.log |awk '{print $2}'`

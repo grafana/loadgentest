@@ -11,7 +11,7 @@ class GatlingSimulation extends Simulation {
   val targetproto = System.getProperty("targetproto")
 
   val httpConf = http
-    .baseURL(targetproto + "://" + targethost) // Here is the root for all relative URLs
+    .baseUrl(targetproto + "://" + targethost) // Here is the root for all relative URLs
     .disableCaching
 
 //    .acceptHeader("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8") // Here are the common headers
