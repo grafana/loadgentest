@@ -5,7 +5,8 @@ from locust.contrib.fasthttp import FastHttpLocust
 class UserBehavior(TaskSet):
     @task
     def bench_task(self):
-        self.client.get("TARGETPATH")
+        while True:
+            self.client.get("TARGETPATH")
 
 class WebsiteUser(FastHttpLocust):
     task_set = UserBehavior
