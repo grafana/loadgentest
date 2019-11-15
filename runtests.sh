@@ -716,13 +716,13 @@ locust_scripting() {
     _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`
   fi
   _RTTAVG=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $5}' |stripdecimals`
-  _RTTMIN="-"
-  _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $12}'`
-  _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $4}'`
-  _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $6}'`
-  _RTTp90=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $8}'`
-  _RTTp95=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $9}'`
-  _RTTp99=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $11}'`
+  _RTTMIN=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $6}' |stripdecimals`
+  _RTTMAX=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $12}'`
+  _RTTp50=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $4}'`
+  _RTTp75=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $6}'`
+  _RTTp90=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $8}'`
+  _RTTp95=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $9}'`
+  _RTTp99=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $11}'`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
