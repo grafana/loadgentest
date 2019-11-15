@@ -1,12 +1,11 @@
-FROM alpine:latest
+FROM locustio/locust:0.13.0
 
-RUN apk --update --no-cache add \
-	python \
-        python-dev \
-        build-base \
-        py-pip
+USER root
+RUN apk add --no-cache bash
 
-RUN pip install locustio pyzmq
+RUN mkdir /bench
+ADD ./runlocust.sh /bench/runlocust.sh
+RUN chmod +x /bench/runlocust.sh
 
-ENTRYPOINT ["/usr/bin/locust"]
-CMD ["--help"]
+USER locust
+CMD /bin/sh -c '/bench/runlocust.sh'
