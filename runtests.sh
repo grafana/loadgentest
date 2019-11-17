@@ -710,7 +710,7 @@ locust_scripting() {
   _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Aggregated' |awk '{print $2}'`
   _ERRORS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Aggregated' |awk '{print $3}' |cut -d\( -f1`
   # Locust RPS reporting is not reliable for short test durations (it can report 0 RPS)
-  _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Aggregated' |awk '{print $4}' |toint`
+  _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Aggregated' |awk '{print $9}' |toint`
   if [ `echo "${_RPS}==0" |bc` -eq 1 ] ; then
     # Calculate some average RPS instead
     _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`

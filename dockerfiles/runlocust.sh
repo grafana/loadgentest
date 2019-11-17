@@ -8,4 +8,4 @@ do
     (locust -f $LOCUST_FILE --slave &) 2> /dev/null
 done
 
-locust -f $LOCUST_FILE --no-web -H $LOCUST_HOST -c $LOCUST_COUNT -r $LOCUST_HATCH_RATE -t=$LOCUST_DURATION --master --expect-slaves=$CPU_COUNT
+locust -f $LOCUST_FILE --no-web -H $LOCUST_HOST -c $LOCUST_COUNT -r $LOCUST_HATCH_RATE -t=$LOCUST_DURATION --master --expect-slaves=$CPU_COUNT --reset-stats

@@ -1,4 +1,4 @@
-FROM locustio/locust:0.13.0
+FROM locustio/locust:0.13.1
 
 USER root
 RUN apk add --no-cache bash
