@@ -703,7 +703,7 @@ locust_scripting() {
   CFG_D=${CONFIGS_D}/locust_${STARTTIME}.py
   replace_all ${CONFIGS}/locust.py ${CFG}
   _START=`gettimestamp`
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-locust --host=\"${TARGETPROTO}://${TARGETHOST}\" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i -e LOCUST_HOST="${TARGETPROTO}://${TARGETHOST}" -e LOCUST_FILE=${CFG_D} -e LOCUST_COUNT=${CONCURRENT} -e LOCUST_HATCH_RATE=${CONCURRENT} -e LOCUST_DURATION=${DURATION} heyman/locust-bench ... "
   docker run -v ${TESTDIR}:/loadgentest -i -e LOCUST_HOST="${TARGETPROTO}://${TARGETHOST}" -e LOCUST_FILE=${CFG_D} -e LOCUST_COUNT=${CONCURRENT} -e LOCUST_HATCH_RATE=${CONCURRENT} -e LOCUST_DURATION=${DURATION} heyman/locust-bench > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
