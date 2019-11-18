@@ -1,6 +1,6 @@
 #!/bin/bash
 
-CPU_COUNT=$(grep ^cpu\\scores /proc/cpuinfo | uniq |  awk '{print $4}')
+CPU_COUNT="$(grep -c ^processor /proc/cpuinfo)"
 
 echo CPU count: $CPU_COUNT
 for i in $( seq 1 $CPU_COUNT )
