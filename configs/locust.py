@@ -1,11 +1,13 @@
-from locust import HttpLocust, TaskSet
+from locust import TaskSet, task, constant
+from locust.contrib.fasthttp import FastHttpLocust
 
-def stylesheet(l):
-    for i in range(100):
-      l.client.get("TARGETPATH")
 
 class UserBehavior(TaskSet):
-    tasks = {stylesheet:1}
+    @task
+    def bench_task(self):
+        while True:
+            self.client.get("TARGETPATH")
 
-class WebsiteUser(HttpLocust):
+class WebsiteUser(FastHttpLocust):
     task_set = UserBehavior
+    wait_time = constant(0)

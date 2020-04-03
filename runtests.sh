@@ -703,26 +703,26 @@ locust_scripting() {
   CFG_D=${CONFIGS_D}/locust_${STARTTIME}.py
   replace_all ${CONFIGS}/locust.py ${CFG}
   _START=`gettimestamp`
-  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-locust --host=\"${TARGETPROTO}://${TARGETHOST}\" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} ... "
-  docker run -v ${TESTDIR}:/loadgentest -i loadimpact/loadgentest-locust --host="${TARGETPROTO}://${TARGETHOST}" --locustfile=${CFG_D} --no-web --clients=${CONCURRENT} --hatch-rate=${CONCURRENT} --num-request=${REQUESTS} > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
+  echo "${TESTNAME}: Executing docker run -v ${TESTDIR}:/loadgentest -i -e LOCUST_HOST="${TARGETPROTO}://${TARGETHOST}" -e LOCUST_FILE=${CFG_D} -e LOCUST_COUNT=${CONCURRENT} -e LOCUST_HATCH_RATE=${CONCURRENT} -e LOCUST_DURATION=${DURATION} heyman/locust-bench ... "
+  docker run -v ${TESTDIR}:/loadgentest -i -e LOCUST_HOST="${TARGETPROTO}://${TARGETHOST}" -e LOCUST_FILE=${CFG_D} -e LOCUST_COUNT=${CONCURRENT} -e LOCUST_HATCH_RATE=${CONCURRENT} -e LOCUST_DURATION=${DURATION} heyman/locust-bench > >(tee ${RESULTS}/stdout.log) 2> >(tee ${RESULTS}/stderr.log >&2)
   _END=`gettimestamp`
   _DURATION=`echo "${_END}-${_START}" |bc |stripdecimals`
-  _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $2}'`
-  _ERRORS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $3}' |cut -d\( -f1`
+  _REQUESTS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Aggregated' |awk '{print $2}'`
+  _ERRORS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Aggregated' |awk '{print $3}' |cut -d\( -f1`
   # Locust RPS reporting is not reliable for short test durations (it can report 0 RPS)
-  _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Total' |awk '{print $4}' |toint`
+  _RPS=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ Aggregated' |awk '{print $9}' |toint`
   if [ `echo "${_RPS}==0" |bc` -eq 1 ] ; then
     # Calculate some average RPS instead
     _RPS=`echo "scale=2; x=${_REQUESTS}/${_DURATION}; if (x<1) print 0; x" |bc |toint`
   fi
   _RTTAVG=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $5}' |stripdecimals`
-  _RTTMIN="-"
-  _RTTMAX=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $12}'`
-  _RTTp50=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $4}'`
-  _RTTp75=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $6}'`
-  _RTTp90=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $8}'`
-  _RTTp95=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $9}'`
-  _RTTp99=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $11}'`
+  _RTTMIN=`grep -A 10 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep '^ GET' |head -1 |awk '{print $6}' |stripdecimals`
+  _RTTMAX=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $12}'`
+  _RTTp50=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $4}'`
+  _RTTp75=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $6}'`
+  _RTTp90=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $8}'`
+  _RTTp95=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $9}'`
+  _RTTp99=`grep -A 20 'locust.main: Shutting down' ${RESULTS}/stderr.log |grep "GET ${TARGETPATH}" |tail -1 |awk '{print $11}'`
   echo ""
   echo "${TESTNAME} ${_DURATION}s ${_REQUESTS} ${_ERRORS} ${_RPS} ${_RTTMIN} ${_RTTMAX} ${_RTTAVG} ${_RTTp50} ${_RTTp75} ${_RTTp90} ${_RTTp95} ${_RTTp99}" >${TIMINGS}
   report ${TIMINGS} "Testname Runtime Requests Errors RPS RTTMIN(ms) RTTMAX(ms) RTTAVG(ms) RTT50(ms) RTT75(ms) RTT90(ms) RTT95(ms) RTT99(ms)"
