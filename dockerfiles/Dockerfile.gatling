@@ -1,6 +1,6 @@
 FROM java:8-jdk-alpine
 
-ENV GATLING_VERSION 2.3.0
+ENV GATLING_VERSION 3.2.1
 
 RUN apk --update --no-cache add \
 	wget
